@@ -10431,6 +10431,22 @@ static int io_unregister_iowq_aff(struct io_ring_ctx *ctx)
 	return io_wq_cpu_affinity(tctx->io_wq, NULL);
 }
 
+static int io_register_iowq_max_unbound(struct io_ring_ctx *ctx,
+					void __user *arg)
+{
+	struct io_uring_task *tctx = current->io_uring;
+	__u32 new_count;
+
+	if (!tctx || !tctx->io_wq)
+		return -EINVAL;
+	if (copy_from_user(&new_count, arg, sizeof(new_count)))
+		return -EFAULT;
+	if (new_count > INT_MAX)
+		return -EINVAL;
+
+	return io_wq_max_unbound(tctx->io_wq, new_count);
+}
+
 static bool io_register_op_must_quiesce(int op)
 {
 	switch (op) {
@@ -10448,6 +10464,7 @@ static bool io_register_op_must_quiesce(int op)
 	case IORING_REGISTER_BUFFERS_UPDATE:
 	case IORING_REGISTER_IOWQ_AFF:
 	case IORING_UNREGISTER_IOWQ_AFF:
+	case IORING_REGISTER_IOWQ_MAX_UNBOUND:
 		return false;
 	default:
 		return true;
@@ -10603,6 +10620,12 @@ static int __io_uring_register(struct io_ring_ctx *ctx, unsigned opcode,
 		if (arg || nr_args)
 			break;
 		ret = io_unregister_iowq_aff(ctx);
+		break;
+	case IORING_REGISTER_IOWQ_MAX_UNBOUND:
+		ret = -EINVAL;
+		if (!arg || nr_args != 1)
+			break;
+		ret = io_register_iowq_max_unbound(ctx, arg);
 		break;
 	default:
 		ret = -EINVAL;

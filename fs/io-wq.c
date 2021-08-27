@@ -1152,6 +1152,30 @@ int io_wq_cpu_affinity(struct io_wq *wq, cpumask_var_t mask)
 	return 0;
 }
 
+/*
+ * Set max number of unbounded workers, returns old value. If new_count is 0,
+ * then just return the old value.
+ */
+int io_wq_max_unbound(struct io_wq *wq, int new_count)
+{
+	int i, prev = 0;
+
+	if (new_count > task_rlimit(current, RLIMIT_NPROC))
+		new_count = task_rlimit(current, RLIMIT_NPROC);
+
+	rcu_read_lock();
+	for_each_node(i) {
+		struct io_wqe_acct *acct;
+
+		acct = &wq->wqes[i]->acct[IO_WQ_ACCT_UNBOUND];
+		prev = max_t(int, acct->max_workers, prev);
+		if (new_count)
+			acct->max_workers = new_count;
+	}
+	rcu_read_unlock();
+	return prev;
+}
+
 static __init int io_wq_init(void)
 {
 	int ret;
