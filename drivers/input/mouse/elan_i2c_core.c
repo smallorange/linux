@@ -191,13 +191,6 @@ static int elan_enable_power(struct elan_tp_data *data)
 	int repeat = ETP_RETRY_COUNT;
 	int error;
 
-	error = regulator_enable(data->vcc);
-	if (error) {
-		dev_err(&data->client->dev,
-			"failed to enable regulator: %d\n", error);
-		return error;
-	}
-
 	do {
 		error = data->ops->power_control(data->client, true);
 		if (error >= 0)
@@ -217,19 +210,8 @@ static int elan_disable_power(struct elan_tp_data *data)
 
 	do {
 		error = data->ops->power_control(data->client, false);
-		if (!error) {
-			error = regulator_disable(data->vcc);
-			if (error) {
-				dev_err(&data->client->dev,
-					"failed to disable regulator: %d\n",
-					error);
-				/* Attempt to power the chip back up */
-				data->ops->power_control(data->client, true);
-				break;
-			}
-
+		if (!error)
 			return 0;
-		}
 
 		msleep(30);
 	} while (--repeat > 0);
@@ -1400,8 +1382,18 @@ static int __maybe_unused elan_suspend(struct device *dev)
 		data->irq_wake = (enable_irq_wake(client->irq) == 0);
 	} else {
 		ret = elan_disable_power(data);
+		if (ret)
+			goto err;
+
+		ret = regulator_disable(data->vcc);
+		if (ret) {
+			dev_err(dev, "error %d disabling regulator\n", ret);
+			/* Attempt to power the chip back up */
+			elan_enable_power(data);
+		}
 	}
 
+err:
 	mutex_unlock(&data->sysfs_mutex);
 	return ret;
 }
@@ -1415,6 +1407,12 @@ static int __maybe_unused elan_resume(struct device *dev)
 	if (device_may_wakeup(dev) && data->irq_wake) {
 		disable_irq_wake(client->irq);
 		data->irq_wake = false;
+	}
+
+	error = regulator_enable(data->vcc);
+	if (error) {
+		dev_err(dev, "error %d enabling regulator\n", error);
+		goto err;
 	}
 
 	error = elan_enable_power(data);
