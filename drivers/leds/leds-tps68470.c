@@ -15,12 +15,32 @@
 #include <linux/regmap.h>
 #include <linux/leds.h>
 
-struct tps68470_led_data {
-	struct regmap *tps68470_regmap;
-	unsigned int brightness_a;
-	unsigned int brightness_b;
-	struct led_classdev leda_cdev;
-	struct led_classdev ledb_cdev;
+#define lcdev_to_led(led_cdev) \
+	container_of(led_cdev, struct tps68470_led, lcdev)
+
+#define led_to_tps68470(led, index) \
+	container_of(led, struct tps68470_device, leds[index])
+
+enum tps68470_led_ids {
+	TPS68470_ILED_A,
+	TPS68470_ILED_B,
+	TPS68470_NUM_LEDS
+};
+
+static const char *tps68470_led_names[] = {
+	[TPS68470_ILED_A] = "tps68470-iled_a",
+	[TPS68470_ILED_B] = "tps68470-iled_b",
+};
+
+struct tps68470_led {
+	unsigned int led_id;
+	struct led_classdev lcdev;
+};
+
+struct tps68470_device {
+	struct device *dev;
+	struct regmap *regmap;
+	struct tps68470_led leds[TPS68470_NUM_LEDS];
 };
 
 enum ctrlb_current {
@@ -30,139 +50,125 @@ enum ctrlb_current {
 	CTRLB_16MA	= 3,
 };
 
-static int set_ledb_current(struct regmap *regmap,
-			    unsigned int *data_brightness,
-			    enum led_brightness brightness)
+static int tps68470_brightness_set(struct led_classdev *led_cdev, enum led_brightness brightness)
 {
-	unsigned int ledb_current;
+	struct tps68470_led *led = lcdev_to_led(led_cdev);
+	struct tps68470_device *tps68470 = led_to_tps68470(led, led->led_id);
+	struct regmap *regmap = tps68470->regmap;
 
-	switch (brightness) {
-	case LED_HALF:
-		ledb_current = CTRLB_8MA;
-		break;
-	case LED_FULL:
-		ledb_current = CTRLB_16MA;
-		break;
-	case LED_ON:
-		ledb_current = CTRLB_4MA;
-		break;
-	case LED_OFF:
-		ledb_current = CTRLB_2MA;
-		break;
-	default:
-		return -EINVAL;
+	switch (led->led_id) {
+	case TPS68470_ILED_A:
+		return regmap_update_bits(regmap, TPS68470_REG_ILEDCTL, TPS68470_ILEDCTL_ENA,
+					  brightness ? TPS68470_ILEDCTL_ENA : 0);
+	case TPS68470_ILED_B:
+		return regmap_update_bits(regmap, TPS68470_REG_ILEDCTL, TPS68470_ILEDCTL_ENB,
+					  brightness ? TPS68470_ILEDCTL_ENB : 0);
 	}
-
-	*data_brightness = brightness;
-	return regmap_update_bits(regmap, TPS68470_REG_ILEDCTL,
-				  TPS68470_ILEDCTL_CTRLB, ledb_current);
-}
-
-static int tps68470_brightness_set(struct led_classdev *led_cdev,
-				   enum led_brightness brightness)
-{
-	struct tps68470_led_data *data;
-	struct regmap *regmap;
-	unsigned int mask;
-	unsigned int value;
-	int ret;
-
-	if (!strncmp(led_cdev->name, "tps68470-ileda", 14)) {
-		data = container_of(led_cdev, struct tps68470_led_data, leda_cdev);
-		regmap = data->tps68470_regmap;
-		data->brightness_a = brightness ? TPS68470_ILEDCTL_ENA : 0;
-		mask = TPS68470_ILEDCTL_ENA;
-		value = data->brightness_a;
-	} else if (!strncmp(led_cdev->name, "tps68470-iledb", 14)) {
-		data = container_of(led_cdev, struct tps68470_led_data, ledb_cdev);
-		regmap = data->tps68470_regmap;
-		mask = TPS68470_ILEDCTL_ENB;
-		value = brightness ? TPS68470_ILEDCTL_ENB : 0;
-		/* Set current state for ledb */
-		ret = set_ledb_current(regmap, &data->brightness_b, brightness);
-		if (ret)
-			goto err_exit;
-	} else
-		return -EINVAL;
-
-	ret = regmap_update_bits(regmap, TPS68470_REG_ILEDCTL, mask, value);
-
-err_exit:
-	return ret;
+	return -EINVAL;
 }
 
 static enum led_brightness tps68470_brightness_get(struct led_classdev *led_cdev)
 {
-	struct tps68470_led_data *data = container_of(led_cdev,
-						      struct tps68470_led_data,
-						      ledb_cdev);
+	struct tps68470_led *led = lcdev_to_led(led_cdev);
+	struct tps68470_device *tps68470 = led_to_tps68470(led, led->led_id);
+	struct regmap *regmap = tps68470->regmap;
+	int ret = 0;
+	int value = 0;
 
-	if (!strncmp(led_cdev->name, "tps68470-ileda", 14))
-		return data->brightness_a;
-	else if (!strncmp(led_cdev->name, "tps68470-iledb", 14))
-		return data->brightness_b;
+	ret =  regmap_read(regmap, TPS68470_REG_ILEDCTL, &value);
+	if(ret)
+		goto error;
 
+	switch (led->led_id) {
+	case TPS68470_ILED_A:
+		value = value & TPS68470_ILEDCTL_ENA;
+		break;
+	case TPS68470_ILED_B:
+		value = value & TPS68470_ILEDCTL_ENB;
+		break;
+	}
+
+	return value ? LED_ON : LED_OFF;
+
+error:
+	dev_err(led_cdev->dev, "Failed on reading register\n");
 	return -EINVAL;
 }
 
-static int tps68470_led_probe(struct platform_device *pdev)
+static int tps68470_leds_probe(struct platform_device *pdev)
 {
+	int i = 0;
 	int ret = 0;
-	struct tps68470_led_data *tps68470_led;
+	unsigned int curr;
+	struct tps68470_device *tps68470;
+	struct tps68470_led *led;
+	struct led_classdev *lcdev;
 
-	tps68470_led = devm_kzalloc(&pdev->dev, sizeof(struct tps68470_led_data),
-				    GFP_KERNEL);
-	if (!tps68470_led)
-		return -ENOMEM;
+	tps68470 = devm_kzalloc(&pdev->dev, sizeof(struct tps68470_device),
+				GFP_KERNEL);
+	tps68470->dev = &pdev->dev;
+	tps68470->regmap = dev_get_drvdata(pdev->dev.parent);
 
-	tps68470_led->tps68470_regmap = dev_get_drvdata(pdev->dev.parent);
-	tps68470_led->leda_cdev.name = "tps68470-ileda";
-	tps68470_led->leda_cdev.max_brightness = 1;
-	tps68470_led->leda_cdev.brightness_set_blocking = tps68470_brightness_set;
-	tps68470_led->leda_cdev.brightness_get = tps68470_brightness_get;
-	tps68470_led->leda_cdev.dev = &pdev->dev;
-	tps68470_led->brightness_a = 0;
-	ret = led_classdev_register(&pdev->dev, &tps68470_led->leda_cdev);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to register LEDA: %d\n", ret);
-		return ret;
+	for (i = 0; i < TPS68470_NUM_LEDS; i++) {
+		led = &tps68470->leds[i];
+		lcdev = &led->lcdev;
+
+		led->led_id = i;
+
+		lcdev->name = devm_kasprintf(tps68470->dev, GFP_KERNEL, "%s::%s",
+					     tps68470_led_names[i], LED_FUNCTION_INDICATOR);
+		if (!lcdev->name)
+			return -ENOMEM;
+	
+		lcdev->max_brightness = 1;
+		lcdev->brightness = 0;
+		lcdev->brightness_set_blocking = tps68470_brightness_set;
+		lcdev->brightness_get = tps68470_brightness_get;
+		lcdev->dev = &pdev->dev;
+
+		dev_err(&pdev->dev, "registering: %s\n", lcdev->name);
+
+		ret = devm_led_classdev_register(tps68470->dev, lcdev);
+		if (ret) {
+			dev_err_probe(tps68470->dev, ret,
+				      "error registering led\n");
+			goto err_exit;
+		}
 	}
 
-	tps68470_led->tps68470_regmap = dev_get_drvdata(pdev->dev.parent);
-	tps68470_led->ledb_cdev.name = "tps68470-iledb";
-	tps68470_led->ledb_cdev.max_brightness = 255;
-	tps68470_led->ledb_cdev.brightness_set_blocking = tps68470_brightness_set;
-	tps68470_led->ledb_cdev.brightness_get = tps68470_brightness_get;
-	tps68470_led->ledb_cdev.dev = &pdev->dev;
-	tps68470_led->brightness_b = 0;
-	ret = led_classdev_register(&pdev->dev, &tps68470_led->ledb_cdev);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to register LEDB: %d\n", ret);
-		return ret;
+	/* configure LEDB current if the properties can be got */
+	if (!device_property_read_u32(&pdev->dev, "ti,ledb-current", &curr)) {
+		switch (curr) {
+		case  2: curr = CTRLB_2MA; break;
+		case  4: curr = CTRLB_4MA; break;
+		case  8: curr = CTRLB_8MA; break;
+		case 16: curr = CTRLB_16MA; break;
+		default:
+			dev_err(&pdev->dev, "Invalid LEDB curr value: %d\n", curr);
+			return -EINVAL;
+		}
+		ret = regmap_update_bits(tps68470->regmap, TPS68470_REG_ILEDCTL,
+					 TPS68470_ILEDCTL_CTRLB, curr);
 	}
 
-	platform_set_drvdata(pdev, tps68470_led);
+err_exit:
+	if(ret) {
+		for (i = 0; i < TPS68470_NUM_LEDS; i++) {
+			if (tps68470->leds[i].lcdev.name)
+				devm_led_classdev_unregister(&pdev->dev,
+							     &tps68470->leds[i].lcdev);
+		}
+	}
 
 	return ret;
 }
-
-static int tps68470_led_remove(struct platform_device *pdev)
-{
-	struct tps68470_led_data *data = platform_get_drvdata(pdev);
-
-	led_classdev_unregister(&data->leda_cdev);
-	led_classdev_unregister(&data->ledb_cdev);
-
-	return 0;
-}
-
 static struct platform_driver tps68470_led_driver = {
 	.driver = {
 		   .name = "tps68470-led",
 	},
-	.probe = tps68470_led_probe,
-	.remove = tps68470_led_remove,
+	.probe = tps68470_leds_probe,
 };
+
 module_platform_driver(tps68470_led_driver);
 
 MODULE_ALIAS("platform:tps68470-led");
