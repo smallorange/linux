@@ -18,9 +18,9 @@
 
 #include <system_global.h>
 #include <type_support.h>
-#if !defined(ISP2401)
+//#if !defined(ISP2401)
 #include "input_formatter.h"
-#endif
+//#endif
 
 #include "ia_css_binary.h"
 #include "ia_css_types.h"
@@ -149,13 +149,13 @@ sh_css_sp_get_debug_state(struct sh_css_sp_debug_state *state);
 
 #endif
 
-#if !defined(ISP2401)
+//#if !defined(ISP2401)
 void
 sh_css_sp_set_if_configs(
     const input_formatter_cfg_t	*config_a,
     const input_formatter_cfg_t	*config_b,
     const uint8_t		if_config_index);
-#endif
+//#endif
 
 void
 sh_css_sp_program_input_circuit(int fmt_type,
@@ -233,7 +233,13 @@ sh_css_sp_set_dma_sw_reg(int dma_id,
 			 int request_type,
 			 bool enable);
 
-extern struct sh_css_sp_group sh_css_sp_group;
+void get_css_sp_config(struct sh_css_sp_config_2401 **sp_config_2401,
+		       struct sh_css_sp_config_2400 **sp_config_2400);
+void get_css_sp_group_config(struct sh_css_sp_group_2400 *sp_group_2400,
+			     struct sh_css_sp_group_2401 *sp_group_2401);
+void set_css_sp_group_config(void *sp_group);
+
+extern union sh_css_sp_group sh_css_sp_group;
 extern struct sh_css_sp_stage sh_css_sp_stage;
 extern struct sh_css_isp_stage sh_css_isp_stage;
 

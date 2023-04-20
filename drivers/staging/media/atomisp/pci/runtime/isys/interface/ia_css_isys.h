@@ -76,7 +76,7 @@ unsigned int ia_css_csi2_calculate_input_system_alignment(
     enum atomisp_input_format fmt_type);
 #endif
 
-#if !defined(ISP2401)
+//#if !defined(ISP2401)
 /* CSS Receiver */
 void ia_css_isys_rx_configure(
     const rx_cfg_t *config,
@@ -93,7 +93,7 @@ void ia_css_isys_rx_clear_irq_info(enum mipi_port_id port,
 				   unsigned int irq_infos);
 unsigned int ia_css_isys_rx_translate_irq_infos(unsigned int bits);
 
-#endif /* #if !defined(ISP2401) */
+//#endif /* #if !defined(ISP2401) */
 
 /* @brief Translate format and compression to format type.
  *

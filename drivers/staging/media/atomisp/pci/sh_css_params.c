@@ -2614,7 +2614,7 @@ sh_css_params_init(void)
 						hmm_alloc(CEIL_MUL(sizeof(struct sh_css_ddr_address_map),
 								   HIVE_ISP_DDR_WORD_BYTES)));
 	xmem_sp_group_ptrs = ia_css_refcount_increment(-1,
-						       hmm_alloc(sizeof(struct sh_css_sp_group)));
+						       hmm_alloc(get_sp_group_length()));
 
 	if ((sp_ddr_ptrs == mmgr_NULL) ||
 	    (xmem_sp_group_ptrs == mmgr_NULL)) {
@@ -2624,7 +2624,7 @@ sh_css_params_init(void)
 	}
 	hmm_set(sp_ddr_ptrs, 0, CEIL_MUL(sizeof(struct sh_css_ddr_address_map),
 					 HIVE_ISP_DDR_WORD_BYTES));
-	hmm_set(xmem_sp_group_ptrs, 0, sizeof(struct sh_css_sp_group));
+	hmm_set(xmem_sp_group_ptrs, 0, get_sp_group_length());
 	IA_CSS_LEAVE_ERR_PRIVATE(0);
 	return 0;
 }
@@ -3720,10 +3720,16 @@ struct ia_css_shading_table *ia_css_get_shading_table(struct ia_css_stream
 
 ia_css_ptr sh_css_store_sp_group_to_ddr(void)
 {
+	size_t write_len;
+	if (IS_ISP2401)
+		write_len = sizeof(struct sh_css_sp_group_2401);
+	else
+		write_len = sizeof(struct sh_css_sp_group_2400);
+
 	IA_CSS_ENTER_LEAVE_PRIVATE("void");
 	hmm_store(xmem_sp_group_ptrs,
 		   &sh_css_sp_group,
-		   sizeof(struct sh_css_sp_group));
+		   write_len);
 	return xmem_sp_group_ptrs;
 }
 

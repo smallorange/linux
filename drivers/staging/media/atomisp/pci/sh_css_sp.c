@@ -17,11 +17,9 @@
 
 #include "sh_css_sp.h"
 
-#if !defined(ISP2401)
 #include "input_formatter.h"
-#endif
 
-#include "dma.h"	/* N_DMA_CHANNEL_ID */
+#include "dma.h" /* N_DMA_CHANNEL_ID */
 
 #include "ia_css_buffer.h"
 #include "ia_css_binary.h"
@@ -63,7 +61,7 @@
 
 #include "isp/kernels/ipu2_io_ls/bayer_io_ls/ia_css_bayer_io.host.h"
 
-struct sh_css_sp_group		sh_css_sp_group;
+union sh_css_sp_group		sh_css_sp_group;
 struct sh_css_sp_stage		sh_css_sp_stage;
 struct sh_css_isp_stage		sh_css_isp_stage;
 static struct sh_css_sp_output		sh_css_sp_output;
@@ -97,18 +95,70 @@ store_sp_group_data(void)
 	per_frame_data.sp_group_addr = sh_css_store_sp_group_to_ddr();
 }
 
-static void
-copy_isp_stage_to_sp_stage(void)
+void get_css_sp_config(struct sh_css_sp_config_2401 **sp_config_2401,
+		       struct sh_css_sp_config_2400 **sp_config_2400)
+{
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sh_css_sp_group;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sh_css_sp_group;
+	if (IS_ISP2401)
+		*sp_config_2401 = &sp_group_2401->config;
+
+	*sp_config_2400 = &sp_group_2400->config;
+}
+
+struct sh_css_sp_debug_command	*get_css_sp_debug(void)
+{
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sh_css_sp_group;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sh_css_sp_group;
+	if (IS_ISP2401)
+		return &sp_group_2401->debug;
+
+	return &sp_group_2400->debug;
+}
+
+void get_css_sp_group_config(struct sh_css_sp_group_2400 *sp_group_2400,
+			     struct sh_css_sp_group_2401 *sp_group_2401)
+{
+	if (IS_ISP2401) {
+		if (sp_group_2401)
+			memcpy(sp_group_2401, &sh_css_sp_group,
+			       sizeof(struct sh_css_sp_group_2401));
+	} else {
+		if (sp_group_2400)
+			memcpy(sp_group_2400, &sh_css_sp_group,
+			       sizeof(struct sh_css_sp_group_2400));
+	}
+}
+
+void set_css_sp_group_config(void *sp_group)
+{
+	struct sh_css_sp_group_2400 *sp_group_2400;
+	struct sh_css_sp_group_2401 *sp_group_2401;
+
+	if (IS_ISP2401) {
+		sp_group_2401 = (struct sh_css_sp_group_2401 *)sp_group;
+		memcpy(&sh_css_sp_group, sp_group_2401,
+		       sizeof(struct sh_css_sp_group_2401));
+	} else {
+		sp_group_2400 = (struct sh_css_sp_group_2400 *)sp_group;
+		memcpy(&sh_css_sp_group, sp_group_2401,
+		       sizeof(struct sh_css_sp_group_2400));
+	}
+}
+
+static void copy_isp_stage_to_sp_stage(void)
 {
 	/* [WW07.5]type casting will cause potential issues */
-	sh_css_sp_stage.num_stripes = (uint8_t)
-				      sh_css_isp_stage.binary_info.iterator.num_stripes;
-	sh_css_sp_stage.row_stripes_height = (uint16_t)
-					     sh_css_isp_stage.binary_info.iterator.row_stripes_height;
-	sh_css_sp_stage.row_stripes_overlap_lines = (uint16_t)
-		sh_css_isp_stage.binary_info.iterator.row_stripes_overlap_lines;
-	sh_css_sp_stage.top_cropping = (uint16_t)
-				       sh_css_isp_stage.binary_info.pipeline.top_cropping;
+	sh_css_sp_stage.num_stripes =
+		(uint8_t)sh_css_isp_stage.binary_info.iterator.num_stripes;
+	sh_css_sp_stage.row_stripes_height =
+		(uint16_t)sh_css_isp_stage.binary_info.iterator
+			.row_stripes_height;
+	sh_css_sp_stage.row_stripes_overlap_lines =
+		(uint16_t)sh_css_isp_stage.binary_info.iterator
+			.row_stripes_overlap_lines;
+	sh_css_sp_stage.top_cropping =
+		(uint16_t)sh_css_isp_stage.binary_info.pipeline.top_cropping;
 	/* moved to sh_css_sp_init_stage
 	   sh_css_sp_stage.enable.vf_output =
 	   sh_css_isp_stage.binary_info.enable.vf_veceven ||
@@ -124,13 +174,26 @@ store_sp_stage_data(enum ia_css_pipe_id id, unsigned int pipe_num,
 {
 	unsigned int thread_id;
 
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
+	struct sh_css_sp_pipeline *pipe;
+
 	ia_css_pipeline_get_sp_thread_id(pipe_num, &thread_id);
 	copy_isp_stage_to_sp_stage();
 	if (id != IA_CSS_PIPE_ID_COPY)
 		sh_css_sp_stage.isp_stage_addr =
 		    sh_css_store_isp_stage_to_ddr(pipe_num, stage);
-	sh_css_sp_group.pipe[thread_id].sp_stage_addr[stage] =
-	    sh_css_store_sp_stage_to_ddr(pipe_num, stage);
+	if (IS_ISP2401)
+		pipe = &sp_group_2401->pipe[thread_id];
+	else
+		pipe = &sp_group_2400->pipe[thread_id];
+
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
+
+	pipe->sp_stage_addr[stage] = sh_css_store_sp_stage_to_ddr(pipe_num, stage);
+
+	set_css_sp_group_config((void *)&sp_group_config);
 
 	/* Clear for next frame */
 	sh_css_sp_stage.program_input_circuit = false;
@@ -198,6 +261,10 @@ sh_css_sp_start_binary_copy(unsigned int pipe_num,
 			    struct ia_css_frame *out_frame,
 			    unsigned int two_ppc)
 {
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
+
 	enum ia_css_pipe_id pipe_id;
 	unsigned int thread_id;
 	struct sh_css_sp_pipeline *pipe;
@@ -206,7 +273,12 @@ sh_css_sp_start_binary_copy(unsigned int pipe_num,
 	assert(out_frame);
 	pipe_id = IA_CSS_PIPE_ID_CAPTURE;
 	ia_css_pipeline_get_sp_thread_id(pipe_num, &thread_id);
-	pipe = &sh_css_sp_group.pipe[thread_id];
+
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
+	if (IS_ISP2401)
+		pipe = &sp_group_2401->pipe[thread_id];
+	else
+		pipe = &sp_group_2400->pipe[thread_id];
 
 	pipe->copy.bin.bytes_available = out_frame->data_bytes;
 	pipe->num_stages = 1;
@@ -227,11 +299,16 @@ sh_css_sp_start_binary_copy(unsigned int pipe_num,
 	IA_CSS_LOG("pipe_id %d port_config %08x",
 		   pipe->pipe_id, pipe->inout_port_config);
 
-#if !defined(ISP2401)
-	sh_css_sp_group.config.input_formatter.isp_2ppc = (uint8_t)two_ppc;
-#else
-	(void)two_ppc;
-#endif
+	//#if !defined(ISP2401)
+	//	sh_css_sp_group.config.input_formatter.isp_2ppc = (uint8_t)two_ppc;
+	//#else
+	//	(void)two_ppc;
+	//#endif
+	if (!IS_ISP2401)
+		sp_group_2400->config.input_formatter.isp_2ppc =
+			(uint8_t)two_ppc;
+
+	set_css_sp_group_config((void *) &sp_group_config);
 
 	sh_css_sp_stage.num = stage_num;
 	sh_css_sp_stage.stage_type = SH_CSS_SP_STAGE_TYPE;
@@ -253,6 +330,10 @@ sh_css_sp_start_raw_copy(struct ia_css_frame *out_frame,
 			 enum sh_css_pipe_config_override pipe_conf_override,
 			 unsigned int if_config_index)
 {
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
+
 	enum ia_css_pipe_id pipe_id;
 	unsigned int thread_id;
 	u8 stage_num = 0;
@@ -275,11 +356,16 @@ sh_css_sp_start_raw_copy(struct ia_css_frame *out_frame,
 
 	pipe_id = IA_CSS_PIPE_ID_COPY;
 	ia_css_pipeline_get_sp_thread_id(pipe_num, &thread_id);
-	pipe = &sh_css_sp_group.pipe[thread_id];
 
-	pipe->copy.raw.height	    = out_frame->frame_info.res.height;
-	pipe->copy.raw.width	    = out_frame->frame_info.res.width;
-	pipe->copy.raw.padded_width  = out_frame->frame_info.padded_width;
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
+	if (IS_ISP2401)
+		pipe = &sp_group_2401->pipe[thread_id];
+	else
+		pipe = &sp_group_2400->pipe[thread_id];
+
+	pipe->copy.raw.height = out_frame->frame_info.res.height;
+	pipe->copy.raw.width = out_frame->frame_info.res.width;
+	pipe->copy.raw.padded_width = out_frame->frame_info.padded_width;
 	pipe->copy.raw.raw_bit_depth = out_frame->frame_info.raw_bit_depth;
 	pipe->copy.raw.max_input_width = max_input_width;
 	pipe->num_stages = 1;
@@ -305,11 +391,16 @@ sh_css_sp_start_raw_copy(struct ia_css_frame *out_frame,
 	IA_CSS_LOG("pipe_id %d port_config %08x",
 		   pipe->pipe_id, pipe->inout_port_config);
 
-#if !defined(ISP2401)
-	sh_css_sp_group.config.input_formatter.isp_2ppc = (uint8_t)two_ppc;
-#else
-	(void)two_ppc;
-#endif
+	//#if !defined(ISP2401)
+	//	sh_css_sp_group.config.input_formatter.isp_2ppc = (uint8_t)two_ppc;
+	//#else
+	//	(void)two_ppc;
+	//#endif
+	if (!IS_ISP2401)
+		sp_group_2400->config.input_formatter.isp_2ppc =
+			(uint8_t)two_ppc;
+	
+	set_css_sp_group_config((void *)&sp_group_config);
 
 	sh_css_sp_stage.num = stage_num;
 	sh_css_sp_stage.xmem_bin_addr = 0x0;
@@ -326,6 +417,10 @@ sh_css_sp_start_isys_copy(struct ia_css_frame *out_frame,
 			  unsigned int pipe_num, unsigned int max_input_width,
 			  unsigned int if_config_index)
 {
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
+
 	enum ia_css_pipe_id pipe_id;
 	unsigned int thread_id;
 	u8 stage_num = 0;
@@ -349,7 +444,12 @@ sh_css_sp_start_isys_copy(struct ia_css_frame *out_frame,
 
 	pipe_id = IA_CSS_PIPE_ID_COPY;
 	ia_css_pipeline_get_sp_thread_id(pipe_num, &thread_id);
-	pipe = &sh_css_sp_group.pipe[thread_id];
+
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
+	if (IS_ISP2401)
+		pipe = &sp_group_2401->pipe[thread_id];
+	else
+		pipe = &sp_group_2400->pipe[thread_id];
 
 	pipe->copy.raw.height		= out_frame->frame_info.res.height;
 	pipe->copy.raw.width		= out_frame->frame_info.res.width;
@@ -377,6 +477,8 @@ sh_css_sp_start_isys_copy(struct ia_css_frame *out_frame,
 						    queue_id, mmgr_EXCEPTION,
 						    IA_CSS_BUFFER_TYPE_METADATA);
 	}
+
+	set_css_sp_group_config((void *)&sp_group_config);
 
 	ia_css_debug_pipe_graph_dump_sp_raw_copy(out_frame);
 }
@@ -711,20 +813,46 @@ sh_css_sp_configure_prbs(int seed)
 void
 sh_css_sp_configure_enable_raw_pool_locking(bool lock_all)
 {
-	sh_css_sp_group.config.enable_raw_pool_locking = true;
-	sh_css_sp_group.config.lock_all = lock_all;
+	struct sh_css_sp_config_2400 *sp_config_2400;
+	struct sh_css_sp_config_2401 *sp_config_2401;
+
+	get_css_sp_config(&sp_config_2401, &sp_config_2400);
+
+	if (IS_ISP2401) {
+		sp_config_2401->enable_raw_pool_locking = true;
+		sp_config_2401->lock_all = lock_all;
+	} else {
+		sp_config_2400->enable_raw_pool_locking = true;
+		sp_config_2400->lock_all = lock_all;
+	}
 }
 
 void
 sh_css_sp_enable_isys_event_queue(bool enable)
 {
-	sh_css_sp_group.config.enable_isys_event_queue = enable;
+	struct sh_css_sp_config_2400 *sp_config_2400;
+	struct sh_css_sp_config_2401 *sp_config_2401;
+
+	get_css_sp_config(&sp_config_2401, &sp_config_2400);
+	
+	if (IS_ISP2401)
+		sp_config_2401->enable_isys_event_queue = enable;
+	else
+		sp_config_2400->enable_isys_event_queue = enable;
 }
 
 void
 sh_css_sp_set_disable_continuous_viewfinder(bool flag)
 {
-	sh_css_sp_group.config.disable_cont_vf = flag;
+	struct sh_css_sp_config_2400 *sp_config_2400;
+	struct sh_css_sp_config_2401 *sp_config_2401;
+
+	get_css_sp_config(&sp_config_2401, &sp_config_2400);
+
+	if (IS_ISP2401)
+		sp_config_2401->disable_cont_vf = flag;
+	else
+		sp_config_2400->disable_cont_vf = flag;
 }
 
 static int
@@ -756,22 +884,43 @@ sh_css_sp_init_group(bool two_ppc,
 		     bool no_isp_sync,
 		     uint8_t if_config_index)
 {
-#if !defined(ISP2401)
-	sh_css_sp_group.config.input_formatter.isp_2ppc = two_ppc;
-#else
-	(void)two_ppc;
-#endif
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
 
-	sh_css_sp_group.config.no_isp_sync = (uint8_t)no_isp_sync;
+	//#if !defined(ISP2401)
+	//	sh_css_sp_group.config.input_formatter.isp_2ppc = two_ppc;
+	//#else
+	//	(void)two_ppc;
+	//#endif
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
+
+	if (!IS_ISP2401)
+		sp_group_2400->config.input_formatter.isp_2ppc = two_ppc;
+
+	if (IS_ISP2401)
+		sp_group_2401->config.no_isp_sync = (uint8_t)no_isp_sync;
+	else
+		sp_group_2400->config.no_isp_sync = (uint8_t)no_isp_sync;
+
 	/* decide whether the frame is processed online or offline */
-	if (if_config_index == SH_CSS_IF_CONFIG_NOT_NEEDED) return;
-#if !defined(ISP2401)
-	assert(if_config_index < SH_CSS_MAX_IF_CONFIGS);
-	sh_css_sp_group.config.input_formatter.set[if_config_index].stream_format =
-	    input_format;
-#else
-	(void)input_format;
-#endif
+	if (if_config_index == SH_CSS_IF_CONFIG_NOT_NEEDED)
+		return;
+	//#if !defined(ISP2401)
+	//	assert(if_config_index < SH_CSS_MAX_IF_CONFIGS);
+	//	sh_css_sp_group.config.input_formatter.set[if_config_index].stream_format =
+	//	    input_format;
+	//#else
+	//	(void)input_format;
+	//#endif
+
+	if (!IS_ISP2401) {
+		assert(if_config_index < SH_CSS_MAX_IF_CONFIGS);
+		sp_group_2400->config.input_formatter.set[if_config_index]
+			.stream_format = input_format;
+	}
+
+	set_css_sp_group_config((void *)&sp_group_config);
 }
 
 void
@@ -916,6 +1065,11 @@ sh_css_sp_init_stage(struct ia_css_binary *binary,
 		     unsigned int if_config_index,
 		     bool two_ppc)
 {
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
+	struct sh_css_sp_pipeline *sg_group_pipe;
+
 	const struct ia_css_binary_xinfo *xinfo;
 	const struct ia_css_binary_info  *info;
 	int err = 0;
@@ -947,17 +1101,27 @@ sh_css_sp_init_stage(struct ia_css_binary *binary,
 
 	ia_css_pipeline_get_sp_thread_id(pipe_num, &thread_id);
 
+	if (IS_ISP2401)
+		sg_group_pipe = &sp_group_2401->pipe[thread_id];
+	else
+		sg_group_pipe = &sp_group_2400->pipe[thread_id];	
+
 	if (!info) {
-		sh_css_sp_group.pipe[thread_id].sp_stage_addr[stage] = mmgr_NULL;
+		sg_group_pipe->sp_stage_addr[stage] = mmgr_NULL;
 		return 0;
 	}
 
-#if defined(ISP2401)
-	(void)continuous;
-	sh_css_sp_stage.deinterleaved = 0;
-#else
-	sh_css_sp_stage.deinterleaved = ((stage == 0) && continuous);
-#endif
+	//#if defined(ISP2401)
+	//	(void)continuous;
+	//	sh_css_sp_stage.deinterleaved = 0;
+	//#else
+	//	sh_css_sp_stage.deinterleaved = ((stage == 0) && continuous);
+	//#endif
+
+	if (IS_ISP2401) {
+		sh_css_sp_stage.deinterleaved = 0;
+	} else
+		sh_css_sp_stage.deinterleaved = ((stage == 0) && continuous);
 
 	initialize_stage_frames(&sh_css_sp_stage.frames);
 	/*
@@ -1032,21 +1196,35 @@ sh_css_sp_init_stage(struct ia_css_binary *binary,
 	if (err)
 		return err;
 
-#ifdef ISP2401
-	pipe = find_pipe_by_num(sh_css_sp_group.pipe[thread_id].pipe_num);
-	if (!pipe)
-		return -EINVAL;
+	//#ifdef ISP2401
+	//	pipe = find_pipe_by_num(sh_css_sp_group.pipe[thread_id].pipe_num);
+	//	if (!pipe)
+	//		return -EINVAL;
+	//
+	//	if (args->in_frame)
+	//		ia_css_get_crop_offsets(pipe, &args->in_frame->frame_info);
+	//	else
+	//		ia_css_get_crop_offsets(pipe, &binary->in_frame_info);
+	//#else
+	//	(void)pipe; /*avoid build warning*/
+	//#endif
 
-	if (args->in_frame)
-		ia_css_get_crop_offsets(pipe, &args->in_frame->frame_info);
-	else
-		ia_css_get_crop_offsets(pipe, &binary->in_frame_info);
-#else
-	(void)pipe; /*avoid build warning*/
-#endif
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
 
-	err = configure_isp_from_args(&sh_css_sp_group.pipe[thread_id],
-				      binary, args, two_ppc, sh_css_sp_stage.deinterleaved);
+	if (IS_ISP2401) {
+		pipe = find_pipe_by_num(
+			sp_group_2401->pipe[thread_id].pipe_num);
+		if (!pipe)
+			return -EINVAL;
+
+		if (args->in_frame)
+			ia_css_get_crop_offsets(pipe,
+						&args->in_frame->frame_info);
+		else
+			ia_css_get_crop_offsets(pipe, &binary->in_frame_info);
+	}
+
+	err = configure_isp_from_args(sg_group_pipe, binary, args, two_ppc, sh_css_sp_stage.deinterleaved);
 	if (err)
 		return err;
 
@@ -1209,6 +1387,13 @@ sh_css_sp_init_pipeline(struct ia_css_pipeline *me,
 			const struct ia_css_metadata_info *md_info,
 			const enum mipi_port_id port_id)
 {
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
+	struct sh_css_sp_config_2400 *sp_config_2400;
+	struct sh_css_sp_config_2401 *sp_config_2401;
+	struct sh_css_sp_pipeline *sp_pipe;
+
 	/* Get first stage */
 	struct ia_css_pipeline_stage *stage        = NULL;
 	struct ia_css_binary	     *first_binary = NULL;
@@ -1237,8 +1422,13 @@ sh_css_sp_init_pipeline(struct ia_css_pipeline *me,
 		if_config_index = 0x0;
 	}
 
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
+
 	ia_css_pipeline_get_sp_thread_id(pipe_num, &thread_id);
-	memset(&sh_css_sp_group.pipe[thread_id], 0, sizeof(struct sh_css_sp_pipeline));
+	if (IS_ISP2401)
+		memset(&sp_group_2401->pipe[thread_id], 0, sizeof(struct sh_css_sp_pipeline));
+	else
+		memset(&sp_group_2400->pipe[thread_id], 0, sizeof(struct sh_css_sp_pipeline));
 
 	/* Count stages */
 	for (stage = me->stages, num = 0; stage; stage = stage->next, num++) {
@@ -1253,69 +1443,88 @@ sh_css_sp_init_pipeline(struct ia_css_pipeline *me,
 				     offline, if_config_index);
 	} /* if (first_binary != NULL) */
 
+	if (IS_ISP2401) {
+		sp_config_2401 = &sp_group_2401->config;
+		sp_pipe = sp_group_2401->pipe;
+	} else {
+		sp_config_2400 = &sp_group_2400->config;
+		sp_pipe = sp_group_2400->pipe;
+	}
+
 	/* Signal the host immediately after start for SP_ISYS_COPY only */
 	if ((me->num_stages == 1) && me->stages &&
-	    (me->stages->sp_func == IA_CSS_PIPELINE_ISYS_COPY))
-		sh_css_sp_group.config.no_isp_sync = true;
+	    (me->stages->sp_func == IA_CSS_PIPELINE_ISYS_COPY)) {
+		if (IS_ISP2401)
+			sp_config_2401->no_isp_sync = true;
+		else
+			sp_config_2400->no_isp_sync = true;
+	}
 
 	/* Init stage data */
 	sh_css_init_host2sp_frame_data();
 
-	sh_css_sp_group.pipe[thread_id].num_stages = 0;
-	sh_css_sp_group.pipe[thread_id].pipe_id = pipe_id;
-	sh_css_sp_group.pipe[thread_id].thread_id = thread_id;
-	sh_css_sp_group.pipe[thread_id].pipe_num = pipe_num;
-	sh_css_sp_group.pipe[thread_id].num_execs = me->num_execs;
-	sh_css_sp_group.pipe[thread_id].pipe_qos_config = QOS_INVALID;
-	sh_css_sp_group.pipe[thread_id].required_bds_factor = required_bds_factor;
-	sh_css_sp_group.pipe[thread_id].input_system_mode
-	= (uint32_t)input_mode;
-	sh_css_sp_group.pipe[thread_id].port_id = port_id;
-	sh_css_sp_group.pipe[thread_id].dvs_frame_delay = (uint32_t)me->dvs_frame_delay;
+	sp_pipe[thread_id].num_stages = 0;
+	sp_pipe[thread_id].pipe_id = pipe_id;
+	sp_pipe[thread_id].thread_id = thread_id;
+	sp_pipe[thread_id].pipe_num = pipe_num;
+	sp_pipe[thread_id].num_execs = me->num_execs;
+	sp_pipe[thread_id].pipe_qos_config = QOS_INVALID;
+	sp_pipe[thread_id].required_bds_factor =
+		required_bds_factor;
+	sp_pipe[thread_id].input_system_mode =
+		(uint32_t)input_mode;
+	sp_pipe[thread_id].port_id = port_id;
+	sp_pipe[thread_id].dvs_frame_delay =
+		(uint32_t)me->dvs_frame_delay;
 
 	/* TODO: next indicates from which queues parameters need to be
 		 sampled, needs checking/improvement */
 	if (ia_css_pipeline_uses_params(me)) {
-		sh_css_sp_group.pipe[thread_id].pipe_config =
-		SH_CSS_PIPE_CONFIG_SAMPLE_PARAMS << thread_id;
+		sp_pipe[thread_id].pipe_config =
+			SH_CSS_PIPE_CONFIG_SAMPLE_PARAMS << thread_id;
 	}
 
 	/* For continuous use-cases, SP copy is responsible for sampling the
 	 * parameters */
 	if (continuous)
-		sh_css_sp_group.pipe[thread_id].pipe_config = 0;
+		sp_pipe[thread_id].pipe_config = 0;
 
-	sh_css_sp_group.pipe[thread_id].inout_port_config = me->inout_port_config;
+	sp_pipe[thread_id].inout_port_config =
+		me->inout_port_config;
 
 	pipe = find_pipe_by_num(pipe_num);
 	assert(pipe);
 	if (!pipe) {
 		return;
 	}
-	sh_css_sp_group.pipe[thread_id].scaler_pp_lut = sh_css_pipe_get_pp_gdc_lut(pipe);
+	sp_pipe[thread_id].scaler_pp_lut =
+		sh_css_pipe_get_pp_gdc_lut(pipe);
 
 	if (md_info && md_info->size > 0) {
-		sh_css_sp_group.pipe[thread_id].metadata.width  = md_info->resolution.width;
-		sh_css_sp_group.pipe[thread_id].metadata.height = md_info->resolution.height;
-		sh_css_sp_group.pipe[thread_id].metadata.stride = md_info->stride;
-		sh_css_sp_group.pipe[thread_id].metadata.size   = md_info->size;
+		sp_pipe[thread_id].metadata.width =
+			md_info->resolution.width;
+		sp_pipe[thread_id].metadata.height =
+			md_info->resolution.height;
+		sp_pipe[thread_id].metadata.stride =
+			md_info->stride;
+		sp_pipe[thread_id].metadata.size = md_info->size;
 		ia_css_isys_convert_stream_format_to_mipi_format(
-		    md_config->data_type, MIPI_PREDICTOR_NONE,
-		    &sh_css_sp_group.pipe[thread_id].metadata.format);
+			md_config->data_type, MIPI_PREDICTOR_NONE,
+			&sp_pipe[thread_id].metadata.format);
 	}
 
-	sh_css_sp_group.pipe[thread_id].output_frame_queue_id = (uint32_t)SH_CSS_INVALID_QUEUE_ID;
+	sp_pipe[thread_id].output_frame_queue_id = (uint32_t)SH_CSS_INVALID_QUEUE_ID;
 	if (pipe_id != IA_CSS_PIPE_ID_COPY) {
 		ia_css_query_internal_queue_id(IA_CSS_BUFFER_TYPE_OUTPUT_FRAME, thread_id,
 					       (enum sh_css_queue_id *)(
-						   &sh_css_sp_group.pipe[thread_id].output_frame_queue_id));
+						   &sp_pipe[thread_id].output_frame_queue_id));
 	}
 
 	IA_CSS_LOG("pipe_id %d port_config %08x",
-		   pipe_id, sh_css_sp_group.pipe[thread_id].inout_port_config);
+		   pipe_id, sp_pipe[thread_id].inout_port_config);
 
 	for (stage = me->stages, num = 0; stage; stage = stage->next, num++) {
-		sh_css_sp_group.pipe[thread_id].num_stages++;
+		sp_pipe[thread_id].num_stages++;
 		if (is_sp_stage(stage)) {
 			sp_init_sp_stage(stage, pipe_num, two_ppc,
 					 copy_ovrd, if_config_index);
@@ -1331,8 +1540,10 @@ sh_css_sp_init_pipeline(struct ia_css_pipeline *me,
 
 		store_sp_stage_data(pipe_id, pipe_num, num);
 	}
-	sh_css_sp_group.pipe[thread_id].pipe_config |= (uint32_t)
-		(me->acquire_isp_each_stage << IA_CSS_ACQUIRE_ISP_POS);
+	sp_pipe[thread_id].pipe_config |= (uint32_t)(me->acquire_isp_each_stage << IA_CSS_ACQUIRE_ISP_POS);
+
+	set_css_sp_group_config((void *)&sp_group_config);
+
 	store_sp_group_data();
 }
 
@@ -1340,10 +1551,20 @@ void
 sh_css_sp_uninit_pipeline(unsigned int pipe_num)
 {
 	unsigned int thread_id;
+	union sh_css_sp_group sp_group_config;
+	struct sh_css_sp_group_2401 *sp_group_2401 = (struct sh_css_sp_group_2401 *) &sp_group_config;
+	struct sh_css_sp_group_2400 *sp_group_2400 = (struct sh_css_sp_group_2400 *) &sp_group_config;
+	struct sh_css_sp_pipeline *pipe;
 
+	get_css_sp_group_config(sp_group_2400, sp_group_2401);
 	ia_css_pipeline_get_sp_thread_id(pipe_num, &thread_id);
 	/*memset(&sh_css_sp_group.pipe[thread_id], 0, sizeof(struct sh_css_sp_pipeline));*/
-	sh_css_sp_group.pipe[thread_id].num_stages = 0;
+	if (IS_ISP2401)
+		pipe = sp_group_2401->pipe;
+	else
+		pipe = sp_group_2400->pipe;
+	pipe[thread_id].num_stages = 0;
+	set_css_sp_group_config((void *)&sp_group_config);
 }
 
 bool sh_css_write_host2sp_command(enum host2sp_commands host2sp_command)
@@ -1482,8 +1703,7 @@ sh_css_update_host2sp_mipi_metadata(
 			    metadata ? metadata->address : 0);
 }
 
-void
-sh_css_update_host2sp_num_mipi_frames(unsigned int num_frames)
+void sh_css_update_host2sp_num_mipi_frames(unsigned int num_frames)
 {
 	unsigned int HIVE_ADDR_host_sp_com;
 	unsigned int offset;
@@ -1730,6 +1950,7 @@ sh_css_sp_set_dma_sw_reg(int dma_id,
 			 int request_type,
 			 bool enable)
 {
+	struct sh_css_sp_debug_command	*debug;
 	u32 sw_reg;
 	u32 bit_val;
 	u32 bit_offset;
@@ -1740,9 +1961,9 @@ sh_css_sp_set_dma_sw_reg(int dma_id,
 	assert(channel_id >= 0 && channel_id < N_DMA_CHANNEL_ID);
 	assert(request_type >= 0);
 
+	debug = get_css_sp_debug();
 	/* get the software-mask */
-	sw_reg =
-	    sh_css_sp_group.debug.dma_sw_reg;
+	sw_reg = debug->dma_sw_reg;
 
 	/* get the offest of the target bit */
 	bit_offset = (8 * request_type) + channel_id;
@@ -1757,7 +1978,7 @@ sh_css_sp_set_dma_sw_reg(int dma_id,
 	sw_reg |= bit_val;
 
 	/* update the software status of DMA channels */
-	sh_css_sp_group.debug.dma_sw_reg = sw_reg;
+	debug->dma_sw_reg = sw_reg;
 
 	return true;
 }
@@ -1765,7 +1986,7 @@ sh_css_sp_set_dma_sw_reg(int dma_id,
 void
 sh_css_sp_reset_global_vars(void)
 {
-	memset(&sh_css_sp_group, 0, sizeof(struct sh_css_sp_group));
+	memset(&sh_css_sp_group, 0, sizeof(union sh_css_sp_group));
 	memset(&sh_css_sp_stage, 0, sizeof(struct sh_css_sp_stage));
 	memset(&sh_css_isp_stage, 0, sizeof(struct sh_css_isp_stage));
 	memset(&sh_css_sp_output, 0, sizeof(struct sh_css_sp_output));

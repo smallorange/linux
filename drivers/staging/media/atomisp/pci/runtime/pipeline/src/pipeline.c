@@ -439,7 +439,7 @@ bool ia_css_pipeline_has_stopped(struct ia_css_pipeline *pipeline)
 	is around 2.5K, in place of static malloc can be done but
 	if this call is made too often it will lead to fragment memory
 	versus a fixed allocation */
-	static struct sh_css_sp_group sp_group;
+	static union sh_css_sp_group sp_group;
 	unsigned int thread_id;
 	const struct ia_css_fw_info *fw;
 	unsigned int HIVE_ADDR_sp_group;
@@ -448,18 +448,30 @@ bool ia_css_pipeline_has_stopped(struct ia_css_pipeline *pipeline)
 	HIVE_ADDR_sp_group = fw->info.sp.group;
 
 	ia_css_pipeline_get_sp_thread_id(pipeline->pipe_num, &thread_id);
+
+	if (IS_ISP2401) {
+		sp_dmem_load(SP0_ID,
+			     (unsigned int)sp_address_of(sp_group),
+			     &sp_group, sizeof(struct sh_css_sp_group_2401));
+
+		return sp_group.sp_group_2401.pipe[thread_id].num_stages == 0;
+	}
+
 	sp_dmem_load(SP0_ID,
 		     (unsigned int)sp_address_of(sp_group),
-		     &sp_group, sizeof(struct sh_css_sp_group));
-	return sp_group.pipe[thread_id].num_stages == 0;
+		     &sp_group, sizeof(struct sh_css_sp_group_2400));
+
+	return sp_group.sp_group_2401.pipe[thread_id].num_stages == 0;
 }
 
-#if defined(ISP2401)
+//#if defined(ISP2401)
 struct sh_css_sp_pipeline_io_status *ia_css_pipeline_get_pipe_io_status(void)
 {
-	return(&sh_css_sp_group.pipe_io_status);
+	if (IS_ISP2401)
+		return(&sh_css_sp_group.sp_group_2401.pipe_io_status);
+	return NULL;
 }
-#endif
+//#endif
 
 bool ia_css_pipeline_is_mapped(unsigned int key)
 {
