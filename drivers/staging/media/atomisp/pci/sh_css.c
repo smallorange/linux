@@ -2125,13 +2125,8 @@ ia_css_pipe_destroy(struct ia_css_pipe *pipe)
 						    err);
 			}
 		}
-		if (IS_ISP2401)
-			ia_css_frame_free_multiple(NUM_VIDEO_TNR_FRAMES,
-						   pipe->pipe_settings.video.tnr_frames);
-		else
-			ia_css_frame_free_multiple(NUM_VIDEO_TNR_FRAMES,
-						   pipe->pipe_settings.video.tnr_frames);
-
+		ia_css_frame_free_multiple(NUM_VIDEO_TNR_FRAMES,
+					   pipe->pipe_settings.video.tnr_frames);
 		ia_css_frame_free_multiple(MAX_NUM_VIDEO_DELAY_FRAMES,
 					   pipe->pipe_settings.video.delay_frames);
 		break;
@@ -2516,10 +2511,8 @@ load_preview_binaries(struct ia_css_pipe *pipe)
 
 	online = pipe->stream->config.online;
 
-	if (IS_ISP2401)
-		sensor = pipe->stream->config.mode == IA_CSS_INPUT_MODE_SENSOR;
-	else
-		continuous = pipe->stream->config.continuous;
+	sensor = pipe->stream->config.mode == IA_CSS_INPUT_MODE_SENSOR;
+	continuous = pipe->stream->config.continuous;
 
 	if (mycs->preview_binary.info)
 		return 0;
@@ -2642,12 +2635,7 @@ load_preview_binaries(struct ia_css_pipe *pipe)
 		 * In these cases, a copy binary (which typical copies sensor data to DDR) does
 		 * not have much use.
 		 */
-		if (!IS_ISP2401)
-			need_isp_copy_binary = !online && !continuous;
-		else
-			need_isp_copy_binary = !online && !continuous &&
-					       !(pipe->stream->config.mode ==
-						 IA_CSS_INPUT_MODE_MEMORY);
+		need_isp_copy_binary = !online && !continuous;
 
 	/* Copy */
 	if (need_isp_copy_binary) {
@@ -3128,10 +3116,9 @@ init_in_frameinfo_memory_defaults(struct ia_css_pipe *pipe,
 
 	in_frame->frame_info.format = format;
 
-	if (IS_ISP2401) {
-		if (format == IA_CSS_FRAME_FORMAT_RAW)
-			in_frame->frame_info.format = (pipe->stream->config.pack_raw_pixels) ?
-			IA_CSS_FRAME_FORMAT_RAW_PACKED : IA_CSS_FRAME_FORMAT_RAW;
+	if (IS_ISP2401 && format == IA_CSS_FRAME_FORMAT_RAW) {
+		in_frame->frame_info.format = (pipe->stream->config.pack_raw_pixels) ?
+		IA_CSS_FRAME_FORMAT_RAW_PACKED : IA_CSS_FRAME_FORMAT_RAW;
 	}
 
 	in_frame->frame_info.res.width = pipe->stream->config.input_config.input_res.width;
@@ -3144,12 +3131,9 @@ init_in_frameinfo_memory_defaults(struct ia_css_pipe *pipe,
 	ia_css_query_internal_queue_id(IA_CSS_BUFFER_TYPE_INPUT_FRAME, thread_id, &queue_id);
 	in_frame->dynamic_queue_id = queue_id;
 	in_frame->buf_type = IA_CSS_BUFFER_TYPE_INPUT_FRAME;
-
 #ifdef ISP2401
-
 	ia_css_get_crop_offsets(pipe, &in_frame->frame_info);
 #endif
-
 	err = ia_css_frame_init_planes(in_frame);
 
 	ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE, "%s() bayer_order = %d\n",
@@ -3422,8 +3406,6 @@ create_host_preview_pipeline(struct ia_css_pipe *pipe)
 		in_frame = &me->in_frame;
 	} else
 		in_frame = NULL;
-
-
 	err = init_out_frameinfo_defaults(pipe, &me->out_frame[0], 0);
 	if (err)
 		goto ERR;
@@ -5247,12 +5229,9 @@ static int load_primary_binaries(
 	       pipe->mode == IA_CSS_PIPE_ID_COPY);
 
 	online = pipe->stream->config.online;
-	if (IS_ISP2401) {
-		sensor = (pipe->stream->config.mode == IA_CSS_INPUT_MODE_SENSOR);
-	} else {
-		memory = pipe->stream->config.mode == IA_CSS_INPUT_MODE_MEMORY;
-		continuous = pipe->stream->config.continuous;
-	}
+	sensor = (pipe->stream->config.mode == IA_CSS_INPUT_MODE_SENSOR);
+	memory = pipe->stream->config.mode == IA_CSS_INPUT_MODE_MEMORY;
+	continuous = pipe->stream->config.continuous;
 
 	mycs = &pipe->pipe_settings.capture;
 	pipe_out_info = &pipe->output_info[0];
@@ -6705,9 +6684,10 @@ create_host_yuvpp_pipeline(struct ia_css_pipe *pipe)
 		continuous = pipe->stream->config.continuous;
 		need_in_frameinfo_memory =
 		!((sensor && (online || continuous)) || (buffered_sensor && continuous));
-	} else
+	} else {
 		/* Construct in_frame info (only in case we have dynamic input */
 		need_in_frameinfo_memory = pipe->stream->config.mode == IA_CSS_INPUT_MODE_MEMORY;
+	}
 	/*
 	 * the input frame can come from:
 	 *
@@ -6798,11 +6778,9 @@ create_host_yuvpp_pipeline(struct ia_css_pipe *pipe)
 	if (pipe->pipe_settings.yuvpp.copy_binary.info) {
 		struct ia_css_frame *in_frame_local = NULL;
 
-		if (IS_ISP2401) {
+		if (IS_ISP2401 && !online)
 			/* After isp copy is enabled in_frame needs to be passed. */
-			if (!online)
-				in_frame_local = in_frame;
-		}
+			in_frame_local = in_frame;
 
 		if (need_scaler) {
 			ia_css_pipe_util_set_output_frames(bin_out_frame,
@@ -7058,9 +7036,10 @@ create_host_regular_capture_pipeline(struct ia_css_pipe *pipe)
 		need_in_frameinfo_memory =
 		!((sensor && (online || continuous)) || (buffered_sensor &&
 							(online || continuous)));
-	} else
+	} else {
 		/* Construct in_frame info (only in case we have dynamic input */
 		need_in_frameinfo_memory = pipe->stream->config.mode == IA_CSS_INPUT_MODE_MEMORY;
+	}
 
 	if (need_in_frameinfo_memory) {
 		err = init_in_frameinfo_memory_defaults(pipe, &me->in_frame,
@@ -7174,17 +7153,10 @@ create_host_regular_capture_pipeline(struct ia_css_pipe *pipe)
 				local_in_frame = in_frame;
 			else
 				local_in_frame = NULL;
-
-			if (!need_pp && (i == num_primary_stage - 1)) {
-				if (IS_ISP2401) {
-					if (!need_ldc)
-						local_out_frame = out_frame;
-				} else {
-					local_out_frame = out_frame;
-				}
-			} else {
+			if (!need_pp && (i == num_primary_stage - 1) && (!IS_ISP2401 || !need_ldc))
+				local_out_frame = out_frame;
+			else
 				local_out_frame = NULL;
-			}
 			ia_css_pipe_util_set_output_frames(out_frames, 0, local_out_frame);
 			/*
 			 * WARNING: The #if def flag has been added below as a
@@ -7392,17 +7364,8 @@ static int capture_start(struct ia_css_pipe *pipe)
 			return err;
 		}
 	}
-
-	if (IS_ISP2401) {
-		if (pipe->config.mode != IA_CSS_PIPE_MODE_COPY) {
-			err = send_mipi_frames(pipe);
-			if (err) {
-				IA_CSS_LEAVE_ERR_PRIVATE(err);
-				return err;
-			}
-		}
-	} else {
-		/* old isys: need to send_mipi_frames() in all pipe modes */
+	/* old isys: need to send_mipi_frames() in all pipe modes */
+	if (!IS_ISP2401 || (IS_ISP2401 && pipe->config.mode != IA_CSS_PIPE_MODE_COPY)) {
 		err = send_mipi_frames(pipe);
 		if (err) {
 			IA_CSS_LEAVE_ERR_PRIVATE(err);
@@ -8653,7 +8616,6 @@ ia_css_stream_start(struct ia_css_stream *stream)
 		for (idx = 0; idx < IA_CSS_MIPI_SIZE_CHECK_MAX_NOF_ENTRIES_PER_PORT; idx++) {
 			sh_css_sp_group.config.mipi_sizes_for_check[port][idx] =
 			sh_css_get_mipi_sizes_for_check(port, idx);
-
 		}
 	}
 #endif
