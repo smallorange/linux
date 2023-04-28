@@ -360,13 +360,11 @@ allocate_mipi_frames(struct ia_css_pipe *pipe,
 		return -EINVAL;
 	}
 
-	if (IS_ISP2401) {
-		if (pipe->stream->config.online) {
-			ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE,
-					    "allocate_mipi_frames(%p) exit: no buffers needed for 2401 pipe mode.\n",
-					    pipe);
-			return 0;
-		}
+	if (IS_ISP2401 && pipe->stream->config.online) {
+		ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE,
+				    "allocate_mipi_frames(%p) exit: no buffers needed for 2401 pipe mode.\n",
+				    pipe);
+		return 0;
 	}
 
 	if (pipe->stream->config.mode != IA_CSS_INPUT_MODE_BUFFERED_SENSOR) {
@@ -383,29 +381,23 @@ allocate_mipi_frames(struct ia_css_pipe *pipe,
 		return -EINVAL;
 	}
 
-	if (IS_ISP2401) {
-		err = calculate_mipi_buff_size(&pipe->stream->config,
-					       &my_css.mipi_frame_size[port]);
-		/*
-		 * 2401 system allows multiple streams to use same physical port. This is not
-		 * true for 2400 system. Currently 2401 uses MIPI buffers as a temporary solution.
-		 * TODO AM: Once that is changed (removed) this code should be removed as well.
-		 * In that case only 2400 related code should remain.
-		 */
-		if (ref_count_mipi_allocation[port] != 0) {
+	/*
+	 * 2401 system allows multiple streams to use same physical port. This is not
+	 * true for 2400 system. Currently 2401 uses MIPI buffers as a temporary solution.
+	 * TODO AM: Once that is changed (removed) this code should be removed as well.
+	 * In that case only 2400 related code should remain.
+	 */
+	if (ref_count_mipi_allocation[port] != 0) {
+		if (IS_ISP2401) {
+			err = calculate_mipi_buff_size(&pipe->stream->config,
+						       &my_css.mipi_frame_size[port]);
 			ref_count_mipi_allocation[port]++;
-			ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE,
-					    "allocate_mipi_frames(%p) leave: nothing to do, already allocated for this port (port=%d).\n",
-					    pipe, port);
-			return 0;
 		}
-	} else {
-		if (ref_count_mipi_allocation[port] != 0) {
-			ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE,
-					    "allocate_mipi_frames(%p) exit: already allocated for this port (port=%d).\n",
-					    pipe, port);
-			return 0;
-		}
+
+		ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE,
+				    "allocate_mipi_frames(%p) exit: already allocated for this port (port=%d).\n",
+				    pipe, port);
+		return 0;
 	}
 
 	ref_count_mipi_allocation[port]++;
@@ -530,18 +522,6 @@ free_mipi_frames(struct ia_css_pipe *pipe)
 
 				ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE,
 						    "free_mipi_frames(%p) exit (deallocated).\n", pipe);
-			}
-			else {
-				if (IS_ISP2401) {
-					/* 2401 system allows multiple streams to use same physical port. This is not
-					 * true for 2400 system. Currently 2401 uses MIPI buffers as a temporary solution.
-					 * TODO AM: Once that is changed (removed) this code should be removed as well.
-					 * In that case only 2400 related code should remain.
-					 */
-					ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE_PRIVATE,
-							    "free_mipi_frames(%p) leave: nothing to do, other streams still use this port (port=%d).\n",
-							    pipe, port);
-				}
 			}
 		}
 	} else { /* pipe ==NULL */
