@@ -601,9 +601,6 @@ static void frame_init_qplane6_planes(struct ia_css_frame *frame)
 
 static int frame_allocate_buffer_data(struct ia_css_frame *frame)
 {
-	if (IS_ISP2401)
-		IA_CSS_ENTER_LEAVE_PRIVATE("frame->data_bytes=%d\n", frame->data_bytes);
-
 	frame->data = hmm_alloc(frame->data_bytes);
 	if (frame->data == mmgr_NULL)
 		return -ENOMEM;
@@ -635,13 +632,10 @@ static int frame_allocate_with_data(struct ia_css_frame **frame,
 
 	if (err) {
 		kvfree(me);
-		if (IS_ISP2401)
-			me = NULL;
-		else
-			return err;
+		*frame = NULL;
+	} else {
+		*frame = me;
 	}
-
-	*frame = me;
 
 	return err;
 }
