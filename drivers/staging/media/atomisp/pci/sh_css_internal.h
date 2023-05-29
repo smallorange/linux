@@ -22,9 +22,9 @@
 #include <platform_support.h>
 #include <linux/stdarg.h>
 
-#if !defined(ISP2401)
+//#if !defined(ISP2401)
 #include "input_formatter.h"
-#endif
+//#endif
 #include "input_system.h"
 
 #include "ia_css_types.h"
@@ -357,14 +357,14 @@ struct sh_css_sp_debug_command {
 	u32 dma_sw_reg;
 };
 
-#if !defined(ISP2401)
+//#if !defined(ISP2401)
 /* SP input formatter configuration.*/
 struct sh_css_sp_input_formatter_set {
 	u32				stream_format;
 	input_formatter_cfg_t	config_a;
 	input_formatter_cfg_t	config_b;
 };
-#endif
+//#endif
 
 #define IA_CSS_MIPI_SIZE_CHECK_MAX_NOF_ENTRIES_PER_PORT (3)
 
@@ -377,7 +377,7 @@ struct sh_css_sp_config {
 	     frames are locked when their EOF event is successfully sent to the
 	     host (true) or when they are passed to the preview/video pipe
 	     (false). */
-#if !defined(ISP2401)
+//#if !defined(ISP2401)
 	struct {
 		u8					a_changed;
 		u8					b_changed;
@@ -385,15 +385,15 @@ struct sh_css_sp_config {
 		struct sh_css_sp_input_formatter_set
 			set[SH_CSS_MAX_IF_CONFIGS]; /* CSI-2 port is used as index. */
 	} input_formatter;
-#endif
-#if !defined(ISP2401)
+//#endif
+//#if !defined(ISP2401)
 	sync_generator_cfg_t	sync_gen;
 	tpg_cfg_t		tpg;
 	prbs_cfg_t		prbs;
 	input_system_cfg_t	input_circuit;
 	u8			input_circuit_cfg_changed;
 	u32		mipi_sizes_for_check[N_CSI_PORTS][IA_CSS_MIPI_SIZE_CHECK_MAX_NOF_ENTRIES_PER_PORT];
-#endif
+//#endif
 	u8                 enable_isys_event_queue;
 	u8			disable_cont_vf;
 };
@@ -409,7 +409,7 @@ enum sh_css_stage_type {
 #define SH_CSS_PIPE_CONFIG_SAMPLE_PARAMS_MASK \
 	((SH_CSS_PIPE_CONFIG_SAMPLE_PARAMS << SH_CSS_MAX_SP_THREADS) - 1)
 
-#if defined(ISP2401)
+//#if defined(ISP2401)
 struct sh_css_sp_pipeline_terminal {
 	union {
 		/* Input System 2401 */
@@ -442,7 +442,7 @@ struct sh_css_sp_pipeline_io_status {
 	u32	running[N_INPUT_SYSTEM_CSI_PORT];	/** configured streams */
 };
 
-#endif
+//#endif
 enum sh_css_port_dir {
 	SH_CSS_PORT_INPUT  = 0,
 	SH_CSS_PORT_OUTPUT  = 1
@@ -641,10 +641,10 @@ struct sh_css_sp_stage {
 struct sh_css_sp_group {
 	struct sh_css_sp_config		config;
 	struct sh_css_sp_pipeline	pipe[SH_CSS_MAX_SP_THREADS];
-#if defined(ISP2401)
+//#if defined(ISP2401)
 	struct sh_css_sp_pipeline_io	pipe_io[SH_CSS_MAX_SP_THREADS];
 	struct sh_css_sp_pipeline_io_status	pipe_io_status;
-#endif
+//#endif
 	struct sh_css_sp_debug_command	debug;
 };
 
@@ -922,13 +922,13 @@ sh_css_frame_info_set_width(struct ia_css_frame_info *info,
 			    unsigned int width,
 			    unsigned int aligned);
 
-#if !defined(ISP2401)
+//#if !defined(ISP2401)
 
 unsigned int
 sh_css_get_mipi_sizes_for_check(const unsigned int port,
 				const unsigned int idx);
 
-#endif
+//#endif
 
 ia_css_ptr
 sh_css_store_sp_group_to_ddr(void);
