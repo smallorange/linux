@@ -3720,10 +3720,64 @@ struct ia_css_shading_table *ia_css_get_shading_table(struct ia_css_stream
 
 ia_css_ptr sh_css_store_sp_group_to_ddr(void)
 {
+	u8 write_buf[8192];
+	u8 *buf_ptr;
+	u8 *offset;
+	size_t sp_group_len_2400;
+	size_t sp_group_len_2401;
 	IA_CSS_ENTER_LEAVE_PRIVATE("void");
+
+	sp_group_len_2400 = sizeof(sh_css_sp_group) -
+			    sizeof(sh_css_sp_group.pipe_io) -
+			    sizeof(sh_css_sp_group.pipe_io_status);
+	
+	buf_ptr = write_buf;
+	if (IS_ISP2401) {
+		*buf_ptr = sh_css_sp_group.config.no_isp_sync;
+		buf_ptr++;
+		*buf_ptr = sh_css_sp_group.config.enable_raw_pool_locking;
+		buf_ptr++;
+		*buf_ptr = sh_css_sp_group.config.lock_all;
+		buf_ptr++;
+		*buf_ptr = sh_css_sp_group.config.enable_isys_event_queue;
+		buf_ptr++;
+		*buf_ptr = sh_css_sp_group.config.disable_cont_vf;
+		buf_ptr++;
+		memset(buf_ptr, 0, 3);
+		buf_ptr += 3; /* Padding 3 bytes for struct sh_css_sp_config*/
+	} else {
+		memcpy(buf_ptr, &sh_css_sp_group.config, sizeof(sh_css_sp_group.config));
+		buf_ptr += sizeof(sh_css_sp_group.config);
+	}
+
+	memcpy(buf_ptr, &sh_css_sp_group.pipe, sizeof(sh_css_sp_group.pipe));
+	buf_ptr += sizeof(sh_css_sp_group.pipe);
+	
+	if (IS_ISP2401) {
+		memcpy(buf_ptr, &sh_css_sp_group.pipe_io, sizeof(sh_css_sp_group.pipe_io));
+		buf_ptr += sizeof(sh_css_sp_group.pipe_io);
+		memcpy(buf_ptr, &sh_css_sp_group.pipe_io_status, sizeof(sh_css_sp_group.pipe_io_status));
+		buf_ptr += sizeof(sh_css_sp_group.pipe_io_status);
+	}
+
+	memcpy(buf_ptr, &sh_css_sp_group.debug, sizeof(sh_css_sp_group.debug));
+	buf_ptr += sizeof(sh_css_sp_group.debug);
+
+	
 	hmm_store(xmem_sp_group_ptrs,
-		   &sh_css_sp_group,
-		   sizeof(struct sh_css_sp_group));
+		  write_buf,
+		  buf_ptr-write_buf);
+
+	int dif = buf_ptr-write_buf;
+	int size_sp = sizeof(sh_css_sp_group);
+	pr_err("sizeof me %d and driver %d\n", dif, size_sp);
+
+	int sp_config_2401 = sizeof(struct sh_css_sp_config_2401);
+	int sp_config_2400 = sizeof(struct sh_css_sp_config);
+	pr_err("sizeof config_2401 %d config_2400 %d\n", sp_config_2401, sp_config_2400);
+	int real_config_2401 = sizeof(struct sh_css_sp_group_2401);
+	pr_err("sizeof struct sh_css_sp_group_2401 %d\n", real_config_2401);
+
 	return xmem_sp_group_ptrs;
 }
 
