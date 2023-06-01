@@ -357,14 +357,12 @@ struct sh_css_sp_debug_command {
 	u32 dma_sw_reg;
 };
 
-//#if !defined(ISP2401)
 /* SP input formatter configuration.*/
 struct sh_css_sp_input_formatter_set {
 	u32				stream_format;
 	input_formatter_cfg_t	config_a;
 	input_formatter_cfg_t	config_b;
 };
-//#endif
 
 #define IA_CSS_MIPI_SIZE_CHECK_MAX_NOF_ENTRIES_PER_PORT (3)
 
@@ -394,6 +392,19 @@ struct sh_css_sp_config {
 	u8			input_circuit_cfg_changed;
 	u32		mipi_sizes_for_check[N_CSI_PORTS][IA_CSS_MIPI_SIZE_CHECK_MAX_NOF_ENTRIES_PER_PORT];
 //#endif
+	u8                 enable_isys_event_queue;
+	u8			disable_cont_vf;
+};
+
+struct sh_css_sp_config_2401 {
+	u8			no_isp_sync; /* Signal host immediately after start */
+	u8			enable_raw_pool_locking; /** Enable Raw Buffer Locking for HALv3 Support */
+	u8			lock_all;
+	/** If raw buffer locking is enabled, this flag indicates whether raw
+	     frames are locked when their EOF event is successfully sent to the
+	     host (true) or when they are passed to the preview/video pipe
+	     (false). */
+
 	u8                 enable_isys_event_queue;
 	u8			disable_cont_vf;
 };
@@ -647,6 +658,17 @@ struct sh_css_sp_group {
 //#endif
 	struct sh_css_sp_debug_command	debug;
 };
+
+struct sh_css_sp_group_2401 {
+	struct sh_css_sp_config_2401		config;
+	struct sh_css_sp_pipeline	pipe[SH_CSS_MAX_SP_THREADS];
+//#if defined(ISP2401)
+	struct sh_css_sp_pipeline_io	pipe_io[SH_CSS_MAX_SP_THREADS];
+	struct sh_css_sp_pipeline_io_status	pipe_io_status;
+//#endif
+	struct sh_css_sp_debug_command	debug;
+};
+
 
 /* Data in SP dmem that is set from the host every stage. */
 struct sh_css_sp_per_frame_data {
