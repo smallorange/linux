@@ -3733,16 +3733,8 @@ ia_css_ptr sh_css_store_sp_group_to_ddr(void)
 	
 	buf_ptr = write_buf;
 	if (IS_ISP2401) {
-		*buf_ptr = sh_css_sp_group.config.no_isp_sync;
-		buf_ptr++;
-		*buf_ptr = sh_css_sp_group.config.enable_raw_pool_locking;
-		buf_ptr++;
-		*buf_ptr = sh_css_sp_group.config.lock_all;
-		buf_ptr++;
-		*buf_ptr = sh_css_sp_group.config.enable_isys_event_queue;
-		buf_ptr++;
-		*buf_ptr = sh_css_sp_group.config.disable_cont_vf;
-		buf_ptr++;
+		memcpy(buf_ptr, &sh_css_sp_group.config, sizeof(u8)*5);
+		buf_ptr += (sizeof(u8) * 5);
 		memset(buf_ptr, 0, 3);
 		buf_ptr += 3; /* Padding 3 bytes for struct sh_css_sp_config*/
 	} else {
@@ -3762,7 +3754,6 @@ ia_css_ptr sh_css_store_sp_group_to_ddr(void)
 
 	memcpy(buf_ptr, &sh_css_sp_group.debug, sizeof(sh_css_sp_group.debug));
 	buf_ptr += sizeof(sh_css_sp_group.debug);
-
 	
 	hmm_store(xmem_sp_group_ptrs,
 		  write_buf,
