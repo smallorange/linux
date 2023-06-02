@@ -22,9 +22,9 @@
 #include <platform_support.h>
 #include <linux/stdarg.h>
 
-//#if !defined(ISP2401)
+
 #include "input_formatter.h"
-//#endif
+
 #include "input_system.h"
 
 #include "ia_css_types.h"
@@ -95,19 +95,20 @@
  *	 these threads can't be used as image pipe
  */
 
-#if !defined(ISP2401)
-#define SH_CSS_SP_INTERNAL_METADATA_THREAD	1
-#else
-#define SH_CSS_SP_INTERNAL_METADATA_THREAD	0
-#endif
+#define SH_CSS_SP_INTERNAL_METADATA_THREAD_2400	1
+#define SH_CSS_SP_INTERNAL_METADATA_THREAD_2401	0
 
 #define SH_CSS_SP_INTERNAL_SERVICE_THREAD		1
 
 #define SH_CSS_MAX_SP_THREADS		5
 
-#define SH_CSS_MAX_SP_INTERNAL_THREADS	(\
-	 SH_CSS_SP_INTERNAL_SERVICE_THREAD +\
-	 SH_CSS_SP_INTERNAL_METADATA_THREAD)
+#define SH_CSS_MAX_SP_INTERNAL_THREADS_2400	(\
+	SH_CSS_SP_INTERNAL_SERVICE_THREAD +\
+	 SH_CSS_SP_INTERNAL_METADATA_THREAD_2400)
+
+#define SH_CSS_MAX_SP_INTERNAL_THREADS_2401	(\
+	SH_CSS_SP_INTERNAL_SERVICE_THREAD +\
+	 SH_CSS_SP_INTERNAL_METADATA_THREAD_2401)
 
 #define SH_CSS_MAX_PIPELINES	SH_CSS_MAX_SP_THREADS
 
