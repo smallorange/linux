@@ -60,7 +60,7 @@ typedef enum {
 	//MIPI_FORMAT_RAW16, /*not supported by 2401*/
 	//MIPI_FORMAT_RAW18,
 	N_MIPI_FORMAT
-} mipi_format_t;
+} mipi_format_2401_t;
 
 #define N_MIPI_FORMAT_CUSTOM	8
 
