@@ -632,7 +632,6 @@ set_view_finder_buffer(const struct ia_css_frame *frame)
 	return 0;
 }
 
-#if !defined(ISP2401)
 void sh_css_sp_set_if_configs(
     const input_formatter_cfg_t	*config_a,
     const input_formatter_cfg_t	*config_b,
@@ -654,7 +653,6 @@ void sh_css_sp_set_if_configs(
 
 	return;
 }
-#endif
 
 #if !defined(ISP2401)
 void
