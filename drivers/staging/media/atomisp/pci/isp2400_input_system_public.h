@@ -13,13 +13,11 @@
  * more details.
  */
 
-#ifndef __INPUT_SYSTEM_PUBLIC_H_INCLUDED__
-#define __INPUT_SYSTEM_PUBLIC_H_INCLUDED__
+#ifndef __INPUT_SYSTEM_PUBLIC_2400_H_INCLUDED__
+#define __INPUT_SYSTEM_PUBLIC_2400_H_INCLUDED__
 
 #include <type_support.h>
-#ifdef ISP2401
 #include "isys_public.h"
-#else
 
 
 typedef struct receiver_state_s			receiver_state_t;
@@ -49,8 +47,6 @@ void receiver_get_state(
 
  \return mipi_format == YUV420
  */
-bool is_mipi_format_yuv420(
-    const mipi_format_t			mipi_format);
 
 /*! Set compression parameters for cfg[cfg_ID] of RECEIVER[ID]
 
@@ -362,6 +358,5 @@ input_system_err_t	input_system_gpfifo_channel_cfg(
     u32		nof_frames,
     target_cfg2400_t	target
 );
-#endif /* #ifdef ISP2401 */
 
 #endif /* __INPUT_SYSTEM_PUBLIC_H_INCLUDED__ */
