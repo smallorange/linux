@@ -2075,7 +2075,7 @@ void ia_css_debug_dump_debug_info(const char *context)
 	if (!IS_ISP2401) {
 		struct irq_controller_state state;
 
-		ia_css_debug_dump_isys_state();
+		//ia_css_debug_dump_isys_state();
 
 		irq_controller_get_state(IRQ2_ID, &state);
 
@@ -2097,9 +2097,9 @@ void ia_css_debug_dump_debug_info(const char *context)
 		ia_css_debug_dtrace(2, "\t\t%-32s: %d\n",
 				    "irq_level_not_pulse",
 				    state.irq_level_not_pulse);
-	} else {
+	}/* else {
 		ia_css_debug_dump_isys_state();
-	}
+	}*/
 
 	ia_css_debug_tagger_state();
 
