@@ -2038,18 +2038,18 @@ static void debug_print_isys_state(input_system_state_t *state)
 }
 #endif
 
-void ia_css_debug_dump_isys_state(void)
-{
-	static input_system_state_t state;
-
-	input_system_get_state(INPUT_SYSTEM0_ID, &state);
-
-#ifndef ISP2401
-	debug_print_isys_state(&state);
-#else
-	input_system_dump_state(INPUT_SYSTEM0_ID, &state);
-#endif
-}
+//void ia_css_debug_dump_isys_state(void)
+//{
+//	static input_system_state_t state;
+//
+//	input_system_get_state(INPUT_SYSTEM0_ID, &state);
+//
+//#ifndef ISP2401
+//	debug_print_isys_state(&state);
+//#else
+//	input_system_dump_state(INPUT_SYSTEM0_ID, &state);
+//#endif
+//}
 
 void ia_css_debug_dump_debug_info(const char *context)
 {
