@@ -13,13 +13,13 @@
  * more details.
  */
 
-#ifndef __INPUT_SYSTEM_PUBLIC_H_INCLUDED__
-#define __INPUT_SYSTEM_PUBLIC_H_INCLUDED__
+#ifndef __INPUT_SYSTEM_PUBLIC_2400_H_INCLUDED__
+#define __INPUT_SYSTEM_PUBLIC_2400_H_INCLUDED__
 
 #include <type_support.h>
-#ifdef ISP2401
+//#ifdef ISP2401
 #include "isys_public.h"
-#else
+//#else
 
 //typedef struct input_system_state_s		input_system_state_t;
 typedef struct receiver_state_s			receiver_state_t;
@@ -363,6 +363,6 @@ input_system_err_t	input_system_gpfifo_channel_cfg(
     u32		nof_frames,
     target_cfg2400_t	target
 );
-#endif /* #ifdef ISP2401 */
+//#endif /* #ifdef ISP2401 */
 
 #endif /* __INPUT_SYSTEM_PUBLIC_H_INCLUDED__ */
