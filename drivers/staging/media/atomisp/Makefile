@@ -150,7 +150,13 @@ atomisp-objs += \
 	pci/hive_isp_css_common/host/timed_ctrl.o \
 	pci/hive_isp_css_common/host/vmem.o \
 	pci/hive_isp_css_shared/host/tag.o \
-	pci/system_local.o
+	pci/system_local.o \
+	pci/runtime/isys/src/ibuf_ctrl_rmgr.o \
+	pci/css_2401_system/host/csi_rx.o \
+	pci/css_2401_system/host/ibuf_ctrl.o \
+	pci/css_2401_system/host/isys_dma.o \
+	pci/css_2401_system/host/isys_irq.o \
+	pci/css_2401_system/host/isys_stream2mmio.o
 
 # These will be needed when clean merge CHT support nicely into the driver
 # Keep them here handy for when we get to that point
