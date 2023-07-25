@@ -189,7 +189,6 @@ ia_css_mipi_frame_calculate_size(const unsigned int width,
  * Check if a source port or TPG/PRBS ID is valid
  */
 
-#if !defined(ISP2401)
 int
 ia_css_mipi_frame_enable_check_on_size(const enum mipi_port_id port,
 				       const unsigned int	size_mem_words)
@@ -212,7 +211,6 @@ ia_css_mipi_frame_enable_check_on_size(const enum mipi_port_id port,
 
 	return err;
 }
-#endif
 
 void
 mipi_init(void)
