@@ -123,6 +123,8 @@ struct t4ka3_device {
 	struct camera_sensor_platform_data *platform_data;
 	struct mutex input_lock; /* serialize sensor's ioctl */
 	struct t4ka3_ctrls ctrls;
+	struct gpio_desc *powerdown_gpio;
+	struct gpio_desc *powerdown_alt_gpio;
 	s64 link_freq[1];
 	int fmt_idx;
 	int streaming;

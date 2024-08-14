@@ -13,6 +13,8 @@
 #include <linux/errno.h>
 #include <linux/fs.h>
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
+#include <linux/gpio/machine.h>
 #include <linux/init.h>
 #include <linux/i2c.h>
 #include <linux/io.h>
@@ -314,208 +316,6 @@ static int t4ka3_init(struct v4l2_subdev *sd, u32 val)
 	ret = t4ka3_write_reg_array(client, t4ka3_init_config);
 
 	return ret;
-}
-
-static void t4ka3_uninit(struct v4l2_subdev *sd)
-{
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
-
-	dev->coarse_itg = 0;
-	dev->gain       = 0;
-}
-
-static int __t4ka3_power_ctrl(struct v4l2_subdev *sd, bool flag)
-{
-	int ret = -1;
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
-
-	if (!dev || !dev->platform_data)
-		return -ENODEV;
-
-	if (flag) {
-		ret = dev->platform_data->v1p8_ctrl(sd, 1);
-		usleep_range(60, 90);
-		if (ret == 0)
-			ret |= dev->platform_data->v2p8_ctrl(sd, 1);
-	} else {
-		ret = dev->platform_data->v1p8_ctrl(sd, 0);
-		ret |= dev->platform_data->v2p8_ctrl(sd, 0);
-	}
-
-	return ret;
-}
-
-static int __power_up(struct v4l2_subdev *sd)
-{
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	int ret;
-	u16 sensor_id;
-
-	dev_info(&client->dev, "@power_up\n");
-	if (NULL == dev->platform_data) {
-		dev_err(&client->dev, "no camera_sensor_platform_data\n");
-		return -ENODEV;
-	}
-
-	/* power control */
-	ret = __t4ka3_power_ctrl(sd, 1);
-	if (ret)
-		goto fail_power;
-
-	/* Check delay time from DS */
-	msleep(5);
-
-	/* flis clock control */
-	ret = dev->platform_data->flisclk_ctrl(sd, 1);
-	if (ret)
-		goto fail_clk;
-	msleep(5);
-	/* gpio ctrl */
-	ret = dev->platform_data->gpio1_ctrl(sd, 1);
-	dev_info(&client->dev, "gpio1_ctrl set %d ret=%d\n", 1, ret);
-	if (ret) {
-		dev_err(&client->dev, "gpio1_ctrl failed\n");
-		goto fail_gpio1;
-	}
-	msleep(1);
-	ret = dev->platform_data->gpio0_ctrl(sd, 1);
-	if (ret) {
-		dev_err(&client->dev, "gpio0_ctrl failed\n");
-		goto fail_gpio0;
-	}
-	msleep(1);
-	ret = dev->platform_data->gpio0_ctrl(sd, 0);
-	if (ret) {
-		dev_err(&client->dev, "gpio0_ctrl failed\n");
-		goto fail_gpio0;
-	}
-	msleep(1);
-	ret = dev->platform_data->gpio0_ctrl(sd, 1);
-	if (ret) {
-		dev_err(&client->dev, "gpio0_ctrl failed\n");
-		goto fail_gpio0;
-	}
-
-	dev_info(&client->dev, "gpio0_ctrl set %d ret=%d\n", 1, ret);
-	msleep(15);
-	ret = t4ka3_detect(client, &sensor_id);
-	if (ret) {
-		dev_err(&client->dev, "sensor detect failed\n");
-		goto fail_clk;
-	}
-
-	return ret;
-
-fail_clk:
-	dev->platform_data->flisclk_ctrl(sd, 0);
-fail_gpio0:
-	dev->platform_data->gpio0_ctrl(sd, 0);
-fail_gpio1:
-	dev->platform_data->gpio1_ctrl(sd, 0);
-fail_power:
-	__t4ka3_power_ctrl(sd, 0);
-	dev_err(&client->dev, "sensor power-up failed\n");
-
-	return ret;
-}
-
-static int power_down(struct v4l2_subdev *sd)
-{
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	int ret = 0;
-	dev_info(&client->dev, "@power_down\n");
-	if (NULL == dev->platform_data) {
-		dev_err(&client->dev, "no camera_sensor_platform_data\n");
-		return -ENODEV;
-	}
-	/*TODO check power down sequence*/
-	ret = dev->platform_data->flisclk_ctrl(sd, 0);
-	if (ret) {
-		dev_err(&client->dev, "flisclk failed\n");
-		goto fail_clk;
-	}
-
-	/* gpio ctrl */
-	ret = dev->platform_data->gpio1_ctrl(sd, 0);
-	dev_info(&client->dev, "gpio1_ctrl set %d ret=%d\n", 0, ret);
-	if (ret) {
-		dev_err(&client->dev, "gpio1_ctrl failed\n");
-		goto fail_gpio;
-	}
-	usleep_range(10000, 15000);
-	ret = dev->platform_data->gpio0_ctrl(sd, 0);
-	if (ret) {
-		dev_err(&client->dev, "gpio0_ctrl failed\n");
-		goto fail_gpio;
-	}
-	dev_info(&client->dev, "gpio0_ctrl set %d ret=%d\n", 0, ret);
-	usleep_range(10000, 15000);
-
-	/* power control */
-	ret = __t4ka3_power_ctrl(sd, 0);
-	if (ret) {
-		dev_err(&client->dev, "power down failed.\n");
-		goto fail_power;
-	}
-
-	return 0;
-
-fail_clk:
-	dev->platform_data->flisclk_ctrl(sd, 0);
-fail_gpio:
-	dev->platform_data->gpio0_ctrl(sd, 0);
-	dev->platform_data->gpio1_ctrl(sd, 0);
-fail_power:
-	dev_err(&client->dev, "sensor power-down failed\n");
-
-	return ret;
-}
-
-static int power_up(struct v4l2_subdev *sd)
-{
-	static const int retry_count = 4;
-	int i, ret;
-
-	for (i = 0; i < retry_count; i++) {
-		ret = __power_up(sd);
-		if (!ret)
-			return 0;
-
-		power_down(sd);
-	}
-	return ret;
-}
-
-static int __t4ka3_s_power(struct v4l2_subdev *sd, int power)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
-	int ret = 0;
-
-	if (power == 0) {
-		if (dev->power == 0)
-			return 0;
-		t4ka3_uninit(sd);
-		ret = power_down(sd);
-		if (ret)
-			v4l2_err(sd, "sensor power down fail\n");
-		dev->power = 0;
-		dev_info(&client->dev, "__t4ka3_s_power off %d\n", __LINE__);
-		return ret;
-	} else {
-		if (dev->power == 1)
-			return 0;
-		ret = power_up(sd);
-		if (ret) {
-			v4l2_err(sd, "cam sensor power up fail\n");
-			return ret;
-		}
-		dev->power = 1;
-		dev_info(&client->dev, "__t4ka3_s_power on %d\n", __LINE__);
-		return t4ka3_init(sd, 0);
-	}
 }
 
 /*
@@ -960,7 +760,7 @@ static int t4ka3_detect(struct i2c_client *client, u16 *id)
 }
 
 static int
-t4ka3_s_config(struct v4l2_subdev *sd, int irq, void *platform_data)
+t4ka3_s_config(struct v4l2_subdev *sd, int irq)
 {
 	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
@@ -968,46 +768,21 @@ t4ka3_s_config(struct v4l2_subdev *sd, int irq, void *platform_data)
 	u16 sensor_id;
 	int ret;
 
-	if (NULL == platform_data)
-		return -ENODEV;
-
-	dev->platform_data =
-		(struct camera_sensor_platform_data *)platform_data;
-
-	mutex_lock(&dev->input_lock);
 	ret = pm_runtime_get_sync(dev->sd.dev);
 	if (ret) {
-		mutex_unlock(&dev->input_lock);
 		dev_err(&client->dev, "t4ka3 power-up err");
 		return ret;
 	}
 
-	/* config & detect sensor */
 	ret = t4ka3_detect(client, &sensor_id);
 	if (ret) {
-		dev_err(&client->dev, "t4ka3_detect err s_config.\n");
+		dev_err(&client->dev, "Failed to detect sensor.\n");
 		goto fail_detect;
 	}
-
-	ret = dev->platform_data->csi_cfg(sd, 1);
-	if (ret)
-		goto fail_csi_cfg;
-
-	ret = pm_runtime_put(dev->sd.dev);
-	mutex_unlock(&dev->input_lock);
-	if (ret) {
-		dev_err(&client->dev, "t4ka3 power down err\n");
-		return ret;
-	}
 	dev_info(&client->dev, "s_config finish\n");
-	return 0;
 
-fail_csi_cfg:
-	dev->platform_data->csi_cfg(sd, 0);
 fail_detect:
-	ret = pm_runtime_put(dev->sd.dev);
-	mutex_unlock(&dev->input_lock);
-	dev_err(&client->dev, "t4ka3 sensor power-gating failed\n");
+	pm_runtime_put(dev->sd.dev);;
 	return ret;
 }
 
@@ -1290,11 +1065,10 @@ static void t4ka3_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
 
-	dev->platform_data->csi_cfg(sd, 0);
 	/*sysfs_remove_group(&client->dev.kobj, t4ka3_attribute_group);*/
 	v4l2_device_unregister_subdev(sd);
 	media_entity_cleanup(&dev->sd.entity);
-	atomisp_gmin_remove_subdev(sd);
+	atomisp_unregister_subdev(sd);
 	t4ka3_vendorid_procfs_uninit();
 	v4l2_ctrl_handler_free(&dev->ctrls.handler);
 	pm_runtime_disable(&client->dev);
@@ -1351,18 +1125,54 @@ static int t4ka3_init_controls(struct t4ka3_device *sensor)
 	return 0;
 }
 
+/*
+ * T4KA3 can be control through only one powerdown GPIO but ACPI lists
+ * two GPIOs for T4KA3. The function for the second GPIO is uncleared.
+ * Therefore, we still get two GPIOs from ACPI and set them with the
+ * same value with out of tree driver.
+ */
+static const struct acpi_gpio_params t4ka3_powerdown_gpio = { 0, 0, true };
+static const struct acpi_gpio_params t4ka3_powerdown_alt_gpio = { 1, 0, true };
+
+static const struct acpi_gpio_mapping t4ka3_gpio_mapping[] = {
+	{ "powerdown-gpios", &t4ka3_powerdown_gpio, 1 },
+	{ "powerdown-alt-gpios", &t4ka3_powerdown_alt_gpio, 1 },
+	{ },
+};
+
 static int t4ka3_pm_suspend(struct device *dev)
 {
 	struct t4ka3_device *sensor = dev_get_drvdata(dev);
 
-	return __t4ka3_s_power (&sensor->sd, 0);
+	gpiod_set_value_cansleep(sensor->powerdown_gpio, 1);
+	gpiod_set_value_cansleep(sensor->powerdown_alt_gpio, 1);
+
+	return 0;
 }
 
 static int t4ka3_pm_resume(struct device *dev)
 {
+	int ret = 0;
+	u16 sensor_id;
 	struct t4ka3_device *sensor = dev_get_drvdata(dev);
+	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 
-	return __t4ka3_s_power (&sensor->sd, 1);
+	usleep_range(5000, 6000);
+
+	gpiod_set_value_cansleep(sensor->powerdown_gpio, 0);
+	gpiod_set_value_cansleep(sensor->powerdown_alt_gpio, 0);
+
+	/* waiting for the sensor after powering up */
+	msleep(20);
+
+	ret = t4ka3_detect(client, &sensor_id);
+	
+	if (ret) {
+		dev_err(&client->dev, "sensor detect failed\n");
+		return ret;
+	}
+
+	return 0;
 }
 
 static DEFINE_RUNTIME_DEV_PM_OPS(t4ka3_pm_ops, t4ka3_pm_suspend, t4ka3_pm_resume, NULL);
@@ -1371,7 +1181,6 @@ static int t4ka3_probe(struct i2c_client *client)
 {
 	struct t4ka3_device *dev;
 	int ret = 0;
-	void *pdata;
 
 	/* allocate sensor device & init sub device */
 	dev = devm_kzalloc(&client->dev, sizeof(*dev), GFP_KERNEL);
@@ -1387,27 +1196,38 @@ static int t4ka3_probe(struct i2c_client *client)
 
 	v4l2_i2c_subdev_init(&(dev->sd), client, &t4ka3_ops);
 
-	pdata = gmin_camera_platform_data(&dev->sd,
-					  ATOMISP_INPUT_FORMAT_RAW_10,
-					  atomisp_bayer_order_grbg);
+	ret = devm_acpi_dev_add_driver_gpios(&client->dev, t4ka3_gpio_mapping);
+	if (ret) {
+		dev_err (&client->dev, "Error on adding ACPI GPIO.");
+		return ret;
+	}
 
-	dev_info(&client->dev, "before s_config\n");
+	dev->powerdown_gpio = devm_gpiod_get(&client->dev, "powerdown", GPIOD_OUT_HIGH);
+	if (IS_ERR(dev->powerdown_gpio))
+		return dev_err_probe(&client->dev, PTR_ERR(dev->powerdown_gpio), "getting powerdown GPIO\n");
+
+	dev->powerdown_alt_gpio = devm_gpiod_get_optional(&client->dev, "powerdown-alt", GPIOD_OUT_HIGH);
+	if (IS_ERR(dev->powerdown_alt_gpio))
+		return dev_err_probe(&client->dev, PTR_ERR(dev->powerdown_alt_gpio), "getting powerdown-alt GPIO\n");
 	
 	pm_runtime_set_suspended(&client->dev);
 	pm_runtime_enable(&client->dev);
 	pm_runtime_set_autosuspend_delay(&client->dev, 1000);
 	pm_runtime_use_autosuspend(&client->dev);
 
-	ret = t4ka3_s_config(&dev->sd, client->irq, pdata);
+	ret = t4ka3_s_config(&dev->sd, client->irq);
 	if (ret) {
 		dev_err(&client->dev, "configuration fail!!\n");
 		atomisp_gmin_remove_subdev(&dev->sd);
 		goto out_free;
 	}
 
-	ret = atomisp_register_i2c_module(&dev->sd, pdata);
-	if (ret)
-		goto out_free;
+	ret = atomisp_register_sensor_no_gmin(&dev->sd, 4, ATOMISP_INPUT_FORMAT_RAW_10,
+					      atomisp_bayer_order_bggr);
+	if (ret) {
+		t4ka3_remove(client);
+		return ret;
+	}
 
 	dev->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	dev->pad.flags = MEDIA_PAD_FL_SOURCE;
