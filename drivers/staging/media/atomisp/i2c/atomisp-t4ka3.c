@@ -40,13 +40,6 @@ static inline struct t4ka3_device *ctrl_to_t4ka3(struct v4l2_ctrl *ctrl)
 }
 
 /* T4KA3 default GRBG */
-static const int t4ka3_atomisp_hv_flip_bayer_order[] = {
-	atomisp_bayer_order_grbg,
-	atomisp_bayer_order_bggr,
-	atomisp_bayer_order_rggb,
-	atomisp_bayer_order_gbrg,
-};
-
 static const int t4ka3_hv_flip_bayer_order[] = {
 	MEDIA_BUS_FMT_SGRBG10_1X10,
 	MEDIA_BUS_FMT_SBGGR10_1X10,
@@ -298,7 +291,6 @@ static int t4ka3_write_reg_array(struct i2c_client *client,
 static void t4ka3_set_bayer_order(struct t4ka3_device *sensor,
 				  struct v4l2_mbus_framefmt *fmt)
 {
-	struct camera_mipi_info *info = v4l2_get_subdev_hostdata(&sensor->sd);
 	int hv_flip = 0;
 
 	if (sensor->ctrls.vflip && sensor->ctrls.vflip->val)
@@ -308,10 +300,6 @@ static void t4ka3_set_bayer_order(struct t4ka3_device *sensor,
 		hv_flip += 2;
 
 	fmt->code = t4ka3_hv_flip_bayer_order[hv_flip];
-	if (info) {
-		info->input_format = ATOMISP_INPUT_FORMAT_RAW_10;
-		info->raw_bayer_order = t4ka3_atomisp_hv_flip_bayer_order[hv_flip];
-	}
 }
 
 static int t4ka3_update_exposure_range(struct t4ka3_device *sensor)
@@ -869,13 +857,10 @@ static void t4ka3_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
 
-	/*sysfs_remove_group(&client->dev.kobj, t4ka3_attribute_group);*/
-	v4l2_device_unregister_subdev(sd);
+	v4l2_async_unregister_subdev(&dev->sd);
 	media_entity_cleanup(&dev->sd.entity);
-	atomisp_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(&dev->ctrls.handler);
 	pm_runtime_disable(&client->dev);
-	kfree(dev);
 }
 
 static int t4ka3_init_controls(struct t4ka3_device *sensor)
@@ -926,27 +911,12 @@ static int t4ka3_init_controls(struct t4ka3_device *sensor)
 	return 0;
 }
 
-/*
- * T4KA3 can be control through only one powerdown GPIO but ACPI lists
- * two GPIOs for T4KA3. The function for the second GPIO is uncleared.
- * Therefore, we still get two GPIOs from ACPI and set them with the
- * same value with out of tree driver.
- */
-static const struct acpi_gpio_params t4ka3_powerdown_gpio = { 0, 0, true };
-static const struct acpi_gpio_params t4ka3_powerdown_alt_gpio = { 1, 0, true };
-
-static const struct acpi_gpio_mapping t4ka3_gpio_mapping[] = {
-	{ "powerdown-gpios", &t4ka3_powerdown_gpio, 1 },
-	{ "powerdown-alt-gpios", &t4ka3_powerdown_alt_gpio, 1 },
-	{ },
-};
-
 static int t4ka3_pm_suspend(struct device *dev)
 {
 	struct t4ka3_device *sensor = dev_get_drvdata(dev);
 
 	gpiod_set_value_cansleep(sensor->powerdown_gpio, 1);
-	gpiod_set_value_cansleep(sensor->powerdown_alt_gpio, 1);
+	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
 
 	return 0;
 }
@@ -961,7 +931,7 @@ static int t4ka3_pm_resume(struct device *dev)
 	usleep_range(5000, 6000);
 
 	gpiod_set_value_cansleep(sensor->powerdown_gpio, 0);
-	gpiod_set_value_cansleep(sensor->powerdown_alt_gpio, 0);
+	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
 
 	/* waiting for the sensor after powering up */
 	msleep(20);
@@ -981,7 +951,18 @@ static DEFINE_RUNTIME_DEV_PM_OPS(t4ka3_pm_ops, t4ka3_pm_suspend, t4ka3_pm_resume
 static int t4ka3_probe(struct i2c_client *client)
 {
 	struct t4ka3_device *dev;
+	struct fwnode_handle *fwnode;
 	int ret = 0;
+
+	/*
+	 * Sometimes the fwnode graph is initialized by the bridge driver.
+	 * Bridge drivers doing this may also add GPIO mappings, wait for this.
+	 */
+	fwnode = fwnode_graph_get_next_endpoint(dev_fwnode(&client->dev), NULL);
+	if (!fwnode)
+		return dev_err_probe(&client->dev, -EPROBE_DEFER, "waiting for fwnode graph endpoint\n");
+
+	fwnode_handle_put(fwnode);
 
 	/* allocate sensor device & init sub device */
 	dev = devm_kzalloc(&client->dev, sizeof(*dev), GFP_KERNEL);
@@ -996,19 +977,13 @@ static int t4ka3_probe(struct i2c_client *client)
 
 	v4l2_i2c_subdev_init(&(dev->sd), client, &t4ka3_ops);
 
-	ret = devm_acpi_dev_add_driver_gpios(&client->dev, t4ka3_gpio_mapping);
-	if (ret) {
-		dev_err (&client->dev, "Error on adding ACPI GPIO.");
-		return ret;
-	}
-
 	dev->powerdown_gpio = devm_gpiod_get(&client->dev, "powerdown", GPIOD_OUT_HIGH);
 	if (IS_ERR(dev->powerdown_gpio))
 		return dev_err_probe(&client->dev, PTR_ERR(dev->powerdown_gpio), "getting powerdown GPIO\n");
 
-	dev->powerdown_alt_gpio = devm_gpiod_get_optional(&client->dev, "powerdown-alt", GPIOD_OUT_HIGH);
-	if (IS_ERR(dev->powerdown_alt_gpio))
-		return dev_err_probe(&client->dev, PTR_ERR(dev->powerdown_alt_gpio), "getting powerdown-alt GPIO\n");
+	dev->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(dev->reset_gpio))
+		return dev_err_probe(&client->dev, PTR_ERR(dev->reset_gpio), "getting reset GPIO\n");
 	
 	pm_runtime_set_suspended(&client->dev);
 	pm_runtime_enable(&client->dev);
@@ -1016,18 +991,8 @@ static int t4ka3_probe(struct i2c_client *client)
 	pm_runtime_use_autosuspend(&client->dev);
 
 	ret = t4ka3_s_config(&dev->sd, client->irq);
-	if (ret) {
-		dev_err(&client->dev, "configuration fail!!\n");
-		atomisp_gmin_remove_subdev(&dev->sd);
-		goto out_free;
-	}
-
-	ret = atomisp_register_sensor_no_gmin(&dev->sd, 1, ATOMISP_INPUT_FORMAT_RAW_10,
-					      atomisp_bayer_order_bggr);
-	if (ret) {
-		t4ka3_remove(client);
-		return ret;
-	}
+	if (ret)
+		goto err_pm_runtime;
 
 	dev->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	dev->pad.flags = MEDIA_PAD_FL_SOURCE;
@@ -1035,21 +1000,25 @@ static int t4ka3_probe(struct i2c_client *client)
 	dev->flip = 0;
 
 	ret = t4ka3_init_controls(dev);
-	if (ret) {
-		t4ka3_remove(client);
-		return ret;
-	}
+	if (ret)
+		goto err_controls;
 
 	ret = media_entity_pads_init(&dev->sd.entity, 1, &dev->pad);
 	if (ret)
-		t4ka3_remove(client);
+		goto err_controls;
 
-	v4l2_info(client, "%s: done!! with ret %d\n", __func__, ret);
+	ret = v4l2_async_register_subdev_sensor(&dev->sd);
+	if (ret)
+		goto err_media_entity;
 
-	return ret;
+	return 0;
 
-out_free:
-	v4l2_device_unregister_subdev(&dev->sd);
+err_media_entity:
+	media_entity_cleanup(&dev->sd.entity);
+err_controls:
+	v4l2_ctrl_handler_free(&dev->ctrls.handler);
+err_pm_runtime:
+	pm_runtime_disable(&client->dev);
 	return ret;
 }
 
