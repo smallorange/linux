@@ -789,11 +789,11 @@ const struct t4ka3_resolution t4ka3_res[] = {
 		.height = 1096,
 		.skip_frames = 2,
 	},
-	{
+/*	{
 		.regs = t4ka3_3280x2464_30fps,
 		.width = 3280,
 		.height = 2464,
-	},
+	}, */
 };
 
 #endif
