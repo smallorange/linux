@@ -135,7 +135,7 @@ struct t4ka3_device {
 	struct mutex input_lock; /* serialize sensor's ioctl */
 	struct t4ka3_ctrls ctrls;
 	struct gpio_desc *powerdown_gpio;
-	struct gpio_desc *powerdown_alt_gpio;
+	struct gpio_desc *reset_gpio;
 	s64 link_freq[1];
 	const struct t4ka3_resolution *res;
 	int streaming;
