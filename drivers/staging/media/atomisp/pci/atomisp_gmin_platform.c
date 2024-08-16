@@ -297,6 +297,12 @@ static struct gmin_cfg_var lenovo_ideapad_miix_310_vars[] = {
 	{}
 };
 
+static struct gmin_cfg_var xiaomi_mipad2_vars[] = {
+	/* _DSM contains the wrong CsiLanes for the back facing T4KA3 sensor */
+	{ "XMCC0003:00_CsiLanes", "4" },
+	{}
+};
+
 static const struct dmi_system_id gmin_vars[] = {
 	/*
 	 * These DMI IDs were present when the atomisp driver was merged into
@@ -353,6 +359,14 @@ static const struct dmi_system_id gmin_vars[] = {
 			DMI_MATCH(DMI_PRODUCT_VERSION, "MIIX 310-10"),
 		},
 		.driver_data = lenovo_ideapad_miix_310_vars,
+	},
+	{
+		.ident = "Xiaomi Mipad2",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Xiaomi Inc"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Mipad2"),
+		},
+		.driver_data = xiaomi_mipad2_vars,
 	},
 	{}
 };
