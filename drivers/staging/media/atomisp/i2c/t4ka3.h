@@ -96,6 +96,7 @@ struct t4ka3_ctrls {
 	struct v4l2_ctrl *exposure;
 	struct v4l2_ctrl *test_pattern;
 	struct v4l2_ctrl *link_freq;
+	struct v4l2_ctrl *gain;
 };
 
 struct t4ka3_device {
