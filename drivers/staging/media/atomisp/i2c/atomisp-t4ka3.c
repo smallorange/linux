@@ -48,9 +48,12 @@
 #define T4KA3_REG_FRAME_LENGTH_LINES		CCI_REG16(0x0340)
 #define T4KA3_REG_TEST_PATTERN_MODE		CCI_REG8(0x0601)
 
-static inline struct t4ka3_device *ctrl_to_t4ka3(struct v4l2_ctrl *ctrl)
+#define T4KA3_HFLIP_BIT					0x1
+#define T4KA3_VFLIP_BIT					0x2
+
+static inline struct t4ka3_data *ctrl_to_t4ka3(struct v4l2_ctrl *ctrl)
 {
-	return container_of(ctrl->handler, struct t4ka3_device, ctrls.handler);
+	return container_of(ctrl->handler, struct t4ka3_data, ctrls.handler);
 }
 
 /* T4KA3 default GRBG */
@@ -61,9 +64,9 @@ static const int t4ka3_hv_flip_bayer_order[] = {
 	MEDIA_BUS_FMT_SGBRG10_1X10,
 };
 
-static int t4ka3_detect(struct t4ka3_device *client, u16 *id);
+static int t4ka3_detect(struct t4ka3_data *sensor, u16 *id);
 
-static void t4ka3_set_bayer_order(struct t4ka3_device *sensor,
+static void t4ka3_set_bayer_order(struct t4ka3_data *sensor,
 				  struct v4l2_mbus_framefmt *fmt)
 {
 	int hv_flip = 0;
@@ -77,7 +80,7 @@ static void t4ka3_set_bayer_order(struct t4ka3_device *sensor,
 	fmt->code = t4ka3_hv_flip_bayer_order[hv_flip];
 }
 
-static int t4ka3_update_exposure_range(struct t4ka3_device *sensor)
+static int t4ka3_update_exposure_range(struct t4ka3_data *sensor)
 {
 	int exp_max = sensor->format.height + sensor->ctrls.vblank->val -
 		      T4KA3_COARSE_INTEGRATION_TIME_MARGIN;
@@ -86,7 +89,7 @@ static int t4ka3_update_exposure_range(struct t4ka3_device *sensor)
 					1, exp_max);
 }
 
-static void t4ka3_fill_format(struct t4ka3_device *sensor,
+static void t4ka3_fill_format(struct t4ka3_data *sensor,
 			      struct v4l2_mbus_framefmt *fmt,
 			      unsigned int width, unsigned int height)
 {
@@ -103,7 +106,7 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 				struct v4l2_subdev_format *format)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct t4ka3_device *sensor = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	struct v4l2_mbus_framefmt *fmt = &format->format;
 	const struct t4ka3_resolution *res;
 	int def, max, ret;
@@ -150,7 +153,7 @@ unlock:
 /* Horizontal flip the image. */
 static int t4ka3_t_hflip(struct v4l2_subdev *sd, int value)
 {
-	struct t4ka3_device *sensor = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	int ret;
 	u64 val;
 
@@ -173,7 +176,7 @@ static int t4ka3_t_hflip(struct v4l2_subdev *sd, int value)
 /* Vertically flip the image */
 static int t4ka3_t_vflip(struct v4l2_subdev *sd, int value)
 {
-	struct t4ka3_device *sensor = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	int ret;
 	u64 val;
 
@@ -193,12 +196,12 @@ static int t4ka3_t_vflip(struct v4l2_subdev *sd, int value)
 	return 0;
 }
 
-static int t4ka3_test_pattern(struct t4ka3_device *sensor, s32 value)
+static int t4ka3_test_pattern(struct t4ka3_data *sensor, s32 value)
 {
 	return cci_write(sensor->regmap, T4KA3_REG_TEST_PATTERN_MODE, value, NULL);
 }
 
-static int t4ka3_detect(struct t4ka3_device *sensor, u16 *id)
+static int t4ka3_detect(struct t4ka3_data *sensor, u16 *id)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	struct i2c_adapter *adapter = client->adapter;
@@ -234,19 +237,19 @@ static int t4ka3_detect(struct t4ka3_device *sensor, u16 *id)
 static int
 t4ka3_s_config(struct v4l2_subdev *sd, int irq)
 {
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
 	u16 sensor_id;
 	int ret;
 
-	ret = pm_runtime_get_sync(dev->sd.dev);
+	ret = pm_runtime_get_sync(sensor->sd.dev);
 	if (ret) {
 		dev_err(&client->dev, "t4ka3 power-up err");
 		return ret;
 	}
 
-	ret = t4ka3_detect(dev, &sensor_id);
+	ret = t4ka3_detect(sensor, &sensor_id);
 	if (ret) {
 		dev_err(&client->dev, "Failed to detect sensor.\n");
 		goto fail_detect;
@@ -254,13 +257,13 @@ t4ka3_s_config(struct v4l2_subdev *sd, int irq)
 	dev_info(&client->dev, "s_config finish\n");
 
 fail_detect:
-	pm_runtime_put(dev->sd.dev);;
+	pm_runtime_put(sensor->sd.dev);;
 	return ret;
 }
 
 static int t4ka3_s_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct t4ka3_device *sensor = ctrl_to_t4ka3(ctrl);
+	struct t4ka3_data *sensor = ctrl_to_t4ka3(ctrl);
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret;
 
@@ -319,7 +322,7 @@ static int t4ka3_s_ctrl(struct v4l2_ctrl *ctrl)
 static int t4ka3_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct t4ka3_device *sensor = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	int ret;
 
 	mutex_lock(&sensor->input_lock);
@@ -428,7 +431,7 @@ t4ka3_enum_frame_size(struct v4l2_subdev *sd,
 }
 
 static struct v4l2_mbus_framefmt *
-__t4ka3_get_pad_format(struct t4ka3_device *sensor, struct v4l2_subdev *sd,
+__t4ka3_get_pad_format(struct t4ka3_data *sensor, struct v4l2_subdev *sd,
 			 struct v4l2_subdev_state *sd_state, unsigned int pad,
 			 enum v4l2_subdev_format_whence which)
 {
@@ -447,9 +450,9 @@ t4ka3_get_pad_format(struct v4l2_subdev *sd,
 		       struct v4l2_subdev_state *sd_state,
 		       struct v4l2_subdev_format *fmt)
 {
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	struct v4l2_mbus_framefmt *format =
-			__t4ka3_get_pad_format(dev, sd, sd_state,
+			__t4ka3_get_pad_format(sensor, sd, sd_state,
 						fmt->pad, fmt->which);
 
 	fmt->format = *format;
@@ -468,11 +471,11 @@ static int t4ka3_get_frame_interval(struct v4l2_subdev *sd,
 
 static int t4ka3_g_skip_frames(struct v4l2_subdev *sd, u32 *frames)
 {
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 
-	mutex_lock(&dev->input_lock);
-	*frames = dev->res->skip_frames;
-	mutex_unlock(&dev->input_lock);
+	mutex_lock(&sensor->input_lock);
+	*frames = sensor->res->skip_frames;
+	mutex_unlock(&sensor->input_lock);
 
 	return 0;
 }
@@ -506,15 +509,15 @@ static const struct v4l2_subdev_ops t4ka3_ops = {
 static void t4ka3_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 
-	v4l2_async_unregister_subdev(&dev->sd);
-	media_entity_cleanup(&dev->sd.entity);
-	v4l2_ctrl_handler_free(&dev->ctrls.handler);
+	v4l2_async_unregister_subdev(&sensor->sd);
+	media_entity_cleanup(&sensor->sd.entity);
+	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 	pm_runtime_disable(&client->dev);
 }
 
-static int t4ka3_init_controls(struct t4ka3_device *sensor)
+static int t4ka3_init_controls(struct t4ka3_data *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &t4ka3_ctrl_ops;
 	struct t4ka3_ctrls *ctrls = &sensor->ctrls;
@@ -569,7 +572,7 @@ static int t4ka3_init_controls(struct t4ka3_device *sensor)
 
 static int t4ka3_pm_suspend(struct device *dev)
 {
-	struct t4ka3_device *sensor = dev_get_drvdata(dev);
+	struct t4ka3_data *sensor = dev_get_drvdata(dev);
 
 	gpiod_set_value_cansleep(sensor->powerdown_gpio, 1);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
@@ -581,7 +584,7 @@ static int t4ka3_pm_resume(struct device *dev)
 {
 	int ret = 0;
 	u16 sensor_id;
-	struct t4ka3_device *sensor = dev_get_drvdata(dev);
+	struct t4ka3_data *sensor = dev_get_drvdata(dev);
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 
 	usleep_range(5000, 6000);
@@ -606,7 +609,7 @@ static DEFINE_RUNTIME_DEV_PM_OPS(t4ka3_pm_ops, t4ka3_pm_suspend, t4ka3_pm_resume
 
 static int t4ka3_probe(struct i2c_client *client)
 {
-	struct t4ka3_device *dev;
+	struct t4ka3_data *sensor;
 	struct fwnode_handle *fwnode;
 	int ret = 0;
 
@@ -621,63 +624,63 @@ static int t4ka3_probe(struct i2c_client *client)
 	fwnode_handle_put(fwnode);
 
 	/* allocate sensor device & init sub device */
-	dev = devm_kzalloc(&client->dev, sizeof(*dev), GFP_KERNEL);
-	if (!dev)
+	sensor = devm_kzalloc(&client->dev, sizeof(*sensor), GFP_KERNEL);
+	if (!sensor)
 		return -ENOMEM;
 
-	mutex_init(&dev->input_lock);
+	mutex_init(&sensor->input_lock);
 
-	dev->link_freq[0] = T4KA3_LINK_FREQ;
-	dev->res = &t4ka3_res[0];
-	t4ka3_fill_format(dev, &dev->format, dev->res->width, dev->res->height);
+	sensor->link_freq[0] = T4KA3_LINK_FREQ;
+	sensor->res = &t4ka3_res[0];
+	t4ka3_fill_format(sensor, &sensor->format, sensor->res->width, sensor->res->height);
 
-	v4l2_i2c_subdev_init(&(dev->sd), client, &t4ka3_ops);
+	v4l2_i2c_subdev_init(&(sensor->sd), client, &t4ka3_ops);
 
-	dev->powerdown_gpio = devm_gpiod_get(&client->dev, "powerdown", GPIOD_OUT_HIGH);
-	if (IS_ERR(dev->powerdown_gpio))
-		return dev_err_probe(&client->dev, PTR_ERR(dev->powerdown_gpio), "getting powerdown GPIO\n");
+	sensor->powerdown_gpio = devm_gpiod_get(&client->dev, "powerdown", GPIOD_OUT_HIGH);
+	if (IS_ERR(sensor->powerdown_gpio))
+		return dev_err_probe(&client->dev, PTR_ERR(sensor->powerdown_gpio), "getting powerdown GPIO\n");
 
-	dev->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset", GPIOD_OUT_HIGH);
-	if (IS_ERR(dev->reset_gpio))
-		return dev_err_probe(&client->dev, PTR_ERR(dev->reset_gpio), "getting reset GPIO\n");
+	sensor->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(sensor->reset_gpio))
+		return dev_err_probe(&client->dev, PTR_ERR(sensor->reset_gpio), "getting reset GPIO\n");
 	
 	pm_runtime_set_suspended(&client->dev);
 	pm_runtime_enable(&client->dev);
 	pm_runtime_set_autosuspend_delay(&client->dev, 1000);
 	pm_runtime_use_autosuspend(&client->dev);
 
-	dev->regmap = devm_cci_regmap_init_i2c(client, 16);
-	if (IS_ERR(dev->regmap))
-		return PTR_ERR(dev->regmap);
-	dev->dev = &client->dev;
+	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
+	if (IS_ERR(sensor->regmap))
+		return PTR_ERR(sensor->regmap);
+	sensor->dev = &client->dev;
 
-	ret = t4ka3_s_config(&dev->sd, client->irq);
+	ret = t4ka3_s_config(&sensor->sd, client->irq);
 	if (ret)
 		goto err_pm_runtime;
 
-	dev->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	dev->pad.flags = MEDIA_PAD_FL_SOURCE;
-	dev->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	dev->flip = 0;
+	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
+	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	sensor->flip = 0;
 
-	ret = t4ka3_init_controls(dev);
+	ret = t4ka3_init_controls(sensor);
 	if (ret)
 		goto err_controls;
 
-	ret = media_entity_pads_init(&dev->sd.entity, 1, &dev->pad);
+	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret)
 		goto err_controls;
 
-	ret = v4l2_async_register_subdev_sensor(&dev->sd);
+	ret = v4l2_async_register_subdev_sensor(&sensor->sd);
 	if (ret)
 		goto err_media_entity;
 
 	return 0;
 
 err_media_entity:
-	media_entity_cleanup(&dev->sd.entity);
+	media_entity_cleanup(&sensor->sd.entity);
 err_controls:
-	v4l2_ctrl_handler_free(&dev->ctrls.handler);
+	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 err_pm_runtime:
 	pm_runtime_disable(&client->dev);
 	return ret;

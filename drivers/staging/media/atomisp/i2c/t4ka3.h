@@ -99,7 +99,7 @@ struct t4ka3_ctrls {
 	struct v4l2_ctrl *gain;
 };
 
-struct t4ka3_device {
+struct t4ka3_data {
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct v4l2_mbus_framefmt format;
@@ -134,7 +134,7 @@ struct t4ka3_reg {
 	u32 val;	/* @set value for read/mod/write, @mask */
 };
 
-#define to_t4ka3_sensor(x) container_of(x, struct t4ka3_device, sd)
+#define to_t4ka3_sensor(x) container_of(x, struct t4ka3_data, sd)
 
 #define T4KA3_MAX_WRITE_BUF_SIZE	30
 struct t4ka3_write_buffer {
