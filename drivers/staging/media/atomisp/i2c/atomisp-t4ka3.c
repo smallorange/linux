@@ -460,15 +460,6 @@ t4ka3_get_pad_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int t4ka3_get_frame_interval(struct v4l2_subdev *sd,
-				    struct v4l2_subdev_state *sd_state,
-				    struct v4l2_subdev_frame_interval *interval)
-{
-	interval->interval.numerator = 1;
-	interval->interval.denominator = T4KA3_FPS;
-	return 0;
-}
-
 static int t4ka3_g_skip_frames(struct v4l2_subdev *sd, u32 *frames)
 {
 	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
@@ -497,7 +488,6 @@ static const struct v4l2_subdev_pad_ops t4ka3_pad_ops = {
 	.enum_frame_size = t4ka3_enum_frame_size,
 	.get_fmt = t4ka3_get_pad_format,
 	.set_fmt = t4ka3_set_pad_format,
-	.get_frame_interval = t4ka3_get_frame_interval,
 };
 
 static const struct v4l2_subdev_ops t4ka3_ops = {
