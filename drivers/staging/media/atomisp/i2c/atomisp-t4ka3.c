@@ -120,7 +120,7 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
 		return 0;
 
-	mutex_lock(&sensor->input_lock);
+	mutex_lock(&sensor->lock);
 	sensor->res = res;
 	sensor->format = *fmt;
 
@@ -146,7 +146,7 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 	sensor->gain = 0;
 
 unlock:
-	mutex_unlock(&sensor->input_lock);
+	mutex_unlock(&sensor->lock);
 	return ret;
 }
 
@@ -325,7 +325,7 @@ static int t4ka3_s_stream(struct v4l2_subdev *sd, int enable)
 	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	int ret;
 
-	mutex_lock(&sensor->input_lock);
+	mutex_lock(&sensor->lock);
 
 	if (sensor->streaming == enable) {
 		dev_warn (&client->dev, "Stream aleady %s\n", enable ? "started" : "stopped");
@@ -390,13 +390,13 @@ static int t4ka3_s_stream(struct v4l2_subdev *sd, int enable)
 		sensor->streaming = 0;
 	}
 
-	mutex_unlock(&sensor->input_lock);
+	mutex_unlock(&sensor->lock);
 	return ret;
 
 error_powerdown:
 	ret = pm_runtime_put(sensor->sd.dev);
 error_unlock:
-	mutex_unlock(&sensor->input_lock);
+	mutex_unlock(&sensor->lock);
 	return ret;
 }
 
@@ -473,9 +473,9 @@ static int t4ka3_g_skip_frames(struct v4l2_subdev *sd, u32 *frames)
 {
 	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 
-	mutex_lock(&sensor->input_lock);
+	mutex_lock(&sensor->lock);
 	*frames = sensor->res->skip_frames;
-	mutex_unlock(&sensor->input_lock);
+	mutex_unlock(&sensor->lock);
 
 	return 0;
 }
@@ -533,7 +533,7 @@ static int t4ka3_init_controls(struct t4ka3_data *sensor)
 
 	v4l2_ctrl_handler_init(hdl, 4);
 
-	hdl->lock = &sensor->input_lock;
+	hdl->lock = &sensor->lock;
 
 	ctrls->vflip = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
 	ctrls->hflip = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
@@ -628,7 +628,7 @@ static int t4ka3_probe(struct i2c_client *client)
 	if (!sensor)
 		return -ENOMEM;
 
-	mutex_init(&sensor->input_lock);
+	mutex_init(&sensor->lock);
 
 	sensor->link_freq[0] = T4KA3_LINK_FREQ;
 	sensor->res = &t4ka3_res[0];

@@ -104,7 +104,7 @@ struct t4ka3_data {
 	struct media_pad pad;
 	struct v4l2_mbus_framefmt format;
 	struct camera_sensor_platform_data *platform_data;
-	struct mutex input_lock; /* serialize sensor's ioctl */
+	struct mutex lock; /* serialize sensor's ioctl */
 	struct t4ka3_ctrls ctrls;
 	struct device *dev;
 	struct regmap *regmap;
