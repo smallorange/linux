@@ -403,6 +403,10 @@ static int t4ka3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = cci_write(sensor->regmap, T4KA3_REG_COARSE_INTEGRATION_TIME,
 				ctrl->val, NULL);
 		break;
+	case V4L2_CID_ANALOGUE_GAIN:
+		ret = cci_write(sensor->regmap, T4KA3_REG_GLOBAL_GAIN,
+				ctrl->val, NULL);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -651,6 +655,11 @@ static int t4ka3_init_controls(struct t4ka3_device *sensor)
 	max = T4KA3_LINES_PER_FRAME - T4KA3_COARSE_INTEGRATION_TIME_MARGIN;
 	ctrls->exposure = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE,
 					    0, max, 1, max);
+
+	ctrls->gain = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
+					T4KA3_MIN_GLOBAL_GAIN_SUPPORTED,
+					T4KA3_MAX_GLOBAL_GAIN_SUPPORTED,
+					1, T4KA3_MIN_GLOBAL_GAIN_SUPPORTED);
 
 	if (hdl->error)
 		return hdl->error;
