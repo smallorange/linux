@@ -198,106 +198,6 @@ static int t4ka3_test_pattern(struct t4ka3_device *sensor, s32 value)
 	return cci_write(sensor->regmap, T4KA3_REG_TEST_PATTERN_MODE, value, NULL);
 }
 
-static long __t4ka3_set_exposure(struct v4l2_subdev *sd,
-					u16 coarse_itg,
-					u16 gain, u16 digitalgain)
-{
-	int ret;
-	u16 lines_per_frame;
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
-
-	/* Validate exposure:  cannot exceed VTS-4 where VTS is 16bit */
-	coarse_itg = clamp_t(u16, coarse_itg,
-		T4KA3_COARSE_INTEGRATION_TIME_MIN,
-					T4KA3_MAX_EXPOSURE_SUPPORTED);
-	/* Validate gain: must not exceed maximum 8bit value */
-	gain = clamp_t(u16, gain, T4KA3_MIN_GLOBAL_GAIN_SUPPORTED,
-					T4KA3_MAX_GLOBAL_GAIN_SUPPORTED);
-
-	/* check coarse integration time margin */
-	if (coarse_itg > T4KA3_LINES_PER_FRAME -
-					T4KA3_COARSE_INTEGRATION_TIME_MARGIN)
-		lines_per_frame = coarse_itg +
-					T4KA3_COARSE_INTEGRATION_TIME_MARGIN;
-	else
-		lines_per_frame = T4KA3_LINES_PER_FRAME;
-
-	ret = cci_write(dev->regmap, T4KA3_REG_FRAME_LENGTH_LINES, lines_per_frame, NULL);
-	if (ret)
-		goto out_disable;
-
-	/* set exposure gain */
-	ret = cci_write(dev->regmap, T4KA3_REG_COARSE_INTEGRATION_TIME, coarse_itg, NULL);
-	if (ret)
-		goto out_disable;
-
-	/* set analogue gain */
-	ret = cci_write(dev->regmap, T4KA3_REG_GLOBAL_GAIN, gain, NULL);
-	if (ret)
-		goto out_disable;
-	/* set digital gain*/
-	ret = cci_write(dev->regmap, T4KA3_REG_DIGGAIN_GREEN_R, digitalgain, NULL);
-	if (ret)
-		goto out_disable;
-
-	ret = cci_write(dev->regmap, T4KA3_REG_DIGGAIN_RED, digitalgain, NULL);
-	if (ret)
-		goto out_disable;
-
-	ret = cci_write(dev->regmap, T4KA3_REG_DIGGAIN_BLUE, digitalgain, NULL);
-	if (ret)
-		goto out_disable;
-
-	ret = cci_write(dev->regmap, T4KA3_REG_DIGGAIN_GREEN_B, digitalgain, NULL);
-	if (ret)
-		goto out_disable;
-
-	dev->gain       = gain;
-	dev->coarse_itg = coarse_itg;
-	dev->digital_gain = digitalgain;
-out_disable:
-/*	t4ka3_write_reg_array(client, t4ka3_param_update);
-out:*/
-	return ret;
-}
-
-static int t4ka3_set_exposure(struct v4l2_subdev *sd, u16 exposure,
-				u16 gain,  u16 digitalgain)
-{
-	struct t4ka3_device *dev = to_t4ka3_sensor(sd);
-	int ret;
-
-	mutex_lock(&dev->input_lock);
-	ret = __t4ka3_set_exposure(sd, exposure, gain, digitalgain);
-	mutex_unlock(&dev->input_lock);
-
-	return ret;
-}
-static long t4ka3_s_exposure(struct v4l2_subdev *sd,
-			struct atomisp_exposure *exposure)
-{
-	u16 coarse_itg, analog_gain, digital_gain;
-
-	coarse_itg = exposure->integration_time[0];
-	analog_gain = exposure->gain[0];
-	digital_gain = exposure->gain[1];
-
-	return t4ka3_set_exposure(sd, coarse_itg, analog_gain, digital_gain);
-}
-
-static long t4ka3_ioctl(struct v4l2_subdev *sd,
-						unsigned int cmd, void *arg)
-{
-
-	switch (cmd) {
-	case ATOMISP_IOC_S_EXPOSURE:
-		return t4ka3_s_exposure(sd, (struct atomisp_exposure *)arg);
-	default:
-		return -EINVAL;
-	}
-	return 0;
-}
-
 static int t4ka3_detect(struct t4ka3_device *sensor, u16 *id)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
@@ -589,10 +489,6 @@ static const struct v4l2_subdev_video_ops t4ka3_video_ops = {
 	.s_stream = t4ka3_s_stream,
 };
 
-static const struct v4l2_subdev_core_ops t4ka3_core_ops = {
-	.ioctl = t4ka3_ioctl,
-};
-
 static const struct v4l2_subdev_pad_ops t4ka3_pad_ops = {
 	.enum_mbus_code = t4ka3_enum_mbus_code,
 	.enum_frame_size = t4ka3_enum_frame_size,
@@ -602,7 +498,6 @@ static const struct v4l2_subdev_pad_ops t4ka3_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops t4ka3_ops = {
-	.core = &t4ka3_core_ops,
 	.video = &t4ka3_video_ops,
 	.pad = &t4ka3_pad_ops,
 	.sensor = &t4ka3_sensor_ops,
