@@ -136,6 +136,14 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 	if (ret)
 		goto unlock;
 
+	def = T4KA3_RES_WIDTH_MAX - res->width;
+	ret = __v4l2_ctrl_modify_range(sensor->ctrls.hblank, def, def, 1, def);
+	if (ret)
+		goto unlock;
+	ret = __v4l2_ctrl_s_ctrl(sensor->ctrls.hblank, def);
+	if (ret)
+		goto unlock;
+
 	/* exposure range depends on vts which may have changed */
 	ret = t4ka3_update_exposure_range(sensor);
 	if (ret)
@@ -540,6 +548,10 @@ static int t4ka3_init_controls(struct t4ka3_data *sensor)
 	ctrls->vblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 					  T4KA3_MIN_VBLANK, max, 1, def);
 
+	def = T4KA3_PIXELS_PER_LINE - sensor->format.width;
+	ctrls->hblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
+					  def, def, 1, def);
+
 	max = T4KA3_LINES_PER_FRAME - T4KA3_COARSE_INTEGRATION_TIME_MARGIN;
 	ctrls->exposure = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE,
 					    0, max, 1, max);
@@ -555,6 +567,7 @@ static int t4ka3_init_controls(struct t4ka3_data *sensor)
 	ctrls->vflip->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
 	ctrls->hflip->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
 	ctrls->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	ctrls->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
 	sensor->sd.ctrl_handler = hdl;
 	return 0;
