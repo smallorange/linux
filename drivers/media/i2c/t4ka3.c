@@ -41,27 +41,51 @@
 #include <linux/firmware.h>
 #include <linux/acpi.h>
 
+#define T4KA3_NATIVE_WIDTH			3280
+#define T4KA3_NATIVE_HEIGHT			2464
+#define T4KA3_NATIVE_START_LEFT			0
+#define T4KA3_NATIVE_START_TOP			0
+#define T4KA3_ACTIVE_WIDTH			3280
+#define T4KA3_ACTIVE_HEIGHT			2460
+#define T4KA3_ACTIVE_START_LEFT			0
+#define T4KA3_ACTIVE_START_TOP			2
+
 #define T4KA3_REG_PRODUCT_ID_HIGH		CCI_REG8(0x0000)
 #define T4KA3_REG_PRODUCT_ID_LOW		CCI_REG8(0x0001)
 
+#define T4KA3_REG_STREAM			CCI_REG8(0x0100)
 #define T4KA3_REG_IMG_ORIENTATION		CCI_REG8(0x0101)
+#define T4KA3_HFLIP_BIT				BIT(0)
+#define T4KA3_VFLIP_BIT				BIT(1)
+#define T4KA3_REG_PARAM_HOLD			CCI_REG8(0x0104)
 #define T4KA3_REG_COARSE_INTEGRATION_TIME	CCI_REG16(0x0202)
 #define T4KA3_REG_DIGGAIN_GREEN_R		CCI_REG16(0x020e)
 #define T4KA3_REG_DIGGAIN_RED			CCI_REG16(0x0210)
 #define T4KA3_REG_DIGGAIN_BLUE			CCI_REG16(0x0212)
 #define T4KA3_REG_DIGGAIN_GREEN_B		CCI_REG16(0x0214)
 #define T4KA3_REG_GLOBAL_GAIN			CCI_REG16(0x0234)
-#define T4KA3_REG_FRAME_LENGTH_LINES		CCI_REG16(0x0340)
+#define T4KA3_REG_FRAME_LENGTH_LINES		CCI_REG16(0x0340) /* aka VTS */
+#define T4KA3_REG_PIXELS_PER_LINE		CCI_REG16(0x0342) /* aka HTS */
+/* These 2 being horz/vert start is a guess (no datasheet), always 0 */
+#define T4KA3_REG_HORZ_START			CCI_REG16(0x0344)
+#define T4KA3_REG_VERT_START			CCI_REG16(0x0346)
+/* Always 3279 (T4KA3_NATIVE_WIDTH - 1, window is used to crop */
+#define T4KA3_REG_HORZ_END			CCI_REG16(0x0348)
+/* Always 2463 (T4KA3_NATIVE_HEIGHT - 1, window is used to crop */
+#define T4KA3_REG_VERT_END			CCI_REG16(0x034a)
+/* Output size (after cropping/window) */
+#define T4KA3_REG_HORZ_OUTPUT_SIZE		CCI_REG16(0x034c)
+#define T4KA3_REG_VERT_OUTPUT_SIZE		CCI_REG16(0x034e)
+/* Window/crop start + size *after* binning */
+#define T4KA3_REG_WIN_START_X			CCI_REG16(0x0408)
+#define T4KA3_REG_WIN_START_Y			CCI_REG16(0x040a)
+#define T4KA3_REG_WIN_WIDTH			CCI_REG16(0x040c)
+#define T4KA3_REG_WIN_HEIGHT			CCI_REG16(0x040e)
 #define T4KA3_REG_TEST_PATTERN_MODE		CCI_REG8(0x0601)
-
-#define T4KA3_HFLIP_BIT					0x1
-#define T4KA3_VFLIP_BIT					0x2
 
 #define T4KA3_NAME				"t4ka3"
 #define T4KA3_PRODUCT_ID			0x1490
 #define MAX_FMTS				1
-#define T4KA3_RES_WIDTH_MAX			3280
-#define T4KA3_RES_HEIGHT_MAX			2464
 #define T4KA3_PIXELS_PER_LINE			3440
 #define T4KA3_LINES_PER_FRAME			2492
 #define T4KA3_FPS				30
@@ -844,7 +868,7 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 	if (ret)
 		goto unlock;
 
-	def = T4KA3_RES_WIDTH_MAX - res->width;
+	def = T4KA3_ACTIVE_WIDTH - res->width;
 	ret = __v4l2_ctrl_modify_range(sensor->ctrls.hblank, def, def, 1, def);
 	if (ret)
 		goto unlock;
@@ -1251,8 +1275,8 @@ static int t4ka3_init_controls(struct t4ka3_data *sensor)
 	ctrls->link_freq = v4l2_ctrl_new_int_menu(hdl, NULL, V4L2_CID_LINK_FREQ,
 						  0, 0, sensor->link_freq);
 
-	def = T4KA3_LINES_PER_FRAME - T4KA3_RES_HEIGHT_MAX;
-	max = T4KA3_MAX_VBLANK - T4KA3_RES_HEIGHT_MAX;
+	def = T4KA3_LINES_PER_FRAME - T4KA3_ACTIVE_HEIGHT;
+	max = T4KA3_MAX_VBLANK - T4KA3_ACTIVE_HEIGHT;
 	ctrls->vblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 					  T4KA3_MIN_VBLANK, max, 1, def);
 
