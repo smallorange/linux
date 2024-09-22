@@ -7,39 +7,27 @@
  * Copyright (C) 2024 Hans de Goede <hansg@kernel.org>
  */
 
-#include <linux/bitops.h>
-#include <linux/device.h>
+#include <linux/acpi.h>
+#include <linux/bits.h>
 #include <linux/delay.h>
+#include <linux/dev_printk.h>
+#include <linux/device.h>
+#include <linux/err.h>
 #include <linux/errno.h>
-#include <linux/fs.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
-#include <linux/gpio/machine.h>
-#include <linux/init.h>
 #include <linux/i2c.h>
-#include <linux/io.h>
-#include <linux/kernel.h>
-#include <media/media-entity.h>
-#include <linux/mm.h>
-#include <linux/kmod.h>
-#include <linux/module.h>
-#include <linux/moduleparam.h>
+#include <linux/mod_devicetable.h>
+#include <linux/mutex.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
-#include <linux/spinlock.h>
-#include <linux/string.h>
-#include <linux/slab.h>
 #include <linux/types.h>
+
+#include <media/media-entity.h>
+#include <media/v4l2-async.h>
 #include <media/v4l2-cci.h>
+#include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
-#include <media/v4l2-device.h>
-#include <linux/v4l2-mediabus.h>
 #include <media/v4l2-subdev.h>
-#include <media/v4l2-subdev.h>
-#include <linux/videodev2.h>
-#include <asm/intel-mid.h>
-#include <linux/firmware.h>
-#include <linux/acpi.h>
 
 #define T4KA3_NATIVE_WIDTH			3280
 #define T4KA3_NATIVE_HEIGHT			2464
@@ -49,9 +37,30 @@
 #define T4KA3_ACTIVE_HEIGHT			2460
 #define T4KA3_ACTIVE_START_LEFT			0
 #define T4KA3_ACTIVE_START_TOP			2
+#define T4KA3_MIN_CROP_WIDTH			2
+#define T4KA3_MIN_CROP_HEIGHT			2
+
+#define T4KA3_PIXELS_PER_LINE			3440
+#define T4KA3_LINES_PER_FRAME			2492
+#define T4KA3_FPS				30
+#define T4KA3_PIXEL_RATE \
+	(T4KA3_PIXELS_PER_LINE * T4KA3_LINES_PER_FRAME * T4KA3_FPS)
+
+/*
+ * TODO this really should be derived from the 19.2 MHz xvclk combined
+ * with the PLL settings. But without a datasheet this is the closest
+ * approximation possible.
+ *
+ * link-freq = pixel_rate * bpp / (lanes * 2)
+ * (lanes * 2) because CSI lanes use double-data-rate (DDR) signalling.
+ * bpp = 10 and lanes = 4
+ */
+#define T4KA3_LINK_FREQ				((s64)T4KA3_PIXEL_RATE * 10 / 8)
+
 
 #define T4KA3_REG_PRODUCT_ID_HIGH		CCI_REG8(0x0000)
 #define T4KA3_REG_PRODUCT_ID_LOW		CCI_REG8(0x0001)
+#define T4KA3_PRODUCT_ID			0x1490
 
 #define T4KA3_REG_STREAM			CCI_REG8(0x0100)
 #define T4KA3_REG_IMG_ORIENTATION		CCI_REG8(0x0101)
@@ -59,12 +68,18 @@
 #define T4KA3_VFLIP_BIT				BIT(1)
 #define T4KA3_REG_PARAM_HOLD			CCI_REG8(0x0104)
 #define T4KA3_REG_COARSE_INTEGRATION_TIME	CCI_REG16(0x0202)
+#define T4KA3_COARSE_INTEGRATION_TIME_MARGIN	6
 #define T4KA3_REG_DIGGAIN_GREEN_R		CCI_REG16(0x020e)
 #define T4KA3_REG_DIGGAIN_RED			CCI_REG16(0x0210)
 #define T4KA3_REG_DIGGAIN_BLUE			CCI_REG16(0x0212)
 #define T4KA3_REG_DIGGAIN_GREEN_B		CCI_REG16(0x0214)
 #define T4KA3_REG_GLOBAL_GAIN			CCI_REG16(0x0234)
+#define T4KA3_MIN_GLOBAL_GAIN_SUPPORTED		0x0080
+#define T4KA3_MAX_GLOBAL_GAIN_SUPPORTED		0x07ff
 #define T4KA3_REG_FRAME_LENGTH_LINES		CCI_REG16(0x0340) /* aka VTS */
+/* FIXME: need a datasheet to verify the min + max vblank values */
+#define T4KA3_MIN_VBLANK			4
+#define T4KA3_MAX_VBLANK			0xffff
 #define T4KA3_REG_PIXELS_PER_LINE		CCI_REG16(0x0342) /* aka HTS */
 /* These 2 being horz/vert start is a guess (no datasheet), always 0 */
 #define T4KA3_REG_HORZ_START			CCI_REG16(0x0344)
@@ -82,33 +97,6 @@
 #define T4KA3_REG_WIN_WIDTH			CCI_REG16(0x040c)
 #define T4KA3_REG_WIN_HEIGHT			CCI_REG16(0x040e)
 #define T4KA3_REG_TEST_PATTERN_MODE		CCI_REG8(0x0601)
-
-#define T4KA3_NAME				"t4ka3"
-#define T4KA3_PRODUCT_ID			0x1490
-#define MAX_FMTS				1
-#define T4KA3_PIXELS_PER_LINE			3440
-#define T4KA3_LINES_PER_FRAME			2492
-#define T4KA3_FPS				30
-#define T4KA3_PIXEL_RATE			(T4KA3_PIXELS_PER_LINE * T4KA3_LINES_PER_FRAME * T4KA3_FPS)
-
-/*
- * TODO this really should be derived from the 19.2 MHz xvclk combined
- * with the PLL settings. But without a datasheet this is the closest
- * approximation possible.
- *
- * link-freq = pixel_rate * bpp / (lanes * 2)
- * (lanes * 2) because CSI lanes use double-data-rate (DDR) signalling.
- * bpp = 10 and lanes = 4
- */
-#define T4KA3_LINK_FREQ				((s64)T4KA3_PIXEL_RATE * 10 / 8)
-
-#define T4KA3_COARSE_INTEGRATION_TIME_MARGIN	6
-#define T4KA3_MAX_GLOBAL_GAIN_SUPPORTED		0x07ff
-#define T4KA3_MIN_GLOBAL_GAIN_SUPPORTED		0x0080
-
-/* FIXME: need a datasheet to verify the min + max vblank values */
-#define T4KA3_MIN_VBLANK			4
-#define T4KA3_MAX_VBLANK			0xffff
 
 struct t4ka3_resolution {
 	const struct cci_reg_sequence *regs;
@@ -134,7 +122,6 @@ struct t4ka3_data {
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct v4l2_mbus_framefmt format;
-	struct camera_sensor_platform_data *platform_data;
 	struct mutex lock; /* serialize sensor's ioctl */
 	struct t4ka3_ctrls ctrls;
 	struct device *dev;
@@ -144,11 +131,6 @@ struct t4ka3_data {
 	s64 link_freq[1];
 	const struct t4ka3_resolution *res;
 	int streaming;
-	int power;
-	u16 coarse_itg;
-	u16 gain;
-	u16 digital_gain;
-	u16 flip;
 };
 
 /**
@@ -862,8 +844,6 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 		goto unlock;
 
 	dev_info(&client->dev, "width %d , height %d\n", res->width, res->height);
-	sensor->coarse_itg = 0;
-	sensor->gain = 0;
 
 unlock:
 	mutex_unlock(&sensor->lock);
@@ -887,8 +867,6 @@ static int t4ka3_t_hflip(struct v4l2_subdev *sd, int value)
 	if (ret)
 		return ret;
 
-	sensor->flip = val;
-
 	t4ka3_set_bayer_order(sensor, &sensor->format);
 	return 0;
 }
@@ -909,8 +887,6 @@ static int t4ka3_t_vflip(struct v4l2_subdev *sd, int value)
 			      T4KA3_VFLIP_BIT, val, NULL);
 	if (ret)
 		return ret;
-
-	sensor->flip = val;
 
 	t4ka3_set_bayer_order(sensor, &sensor->format);
 	return 0;
@@ -1109,10 +1085,10 @@ t4ka3_enum_mbus_code(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_mbus_code_enum *code)
 {
-	if (code->index >= MAX_FMTS)
+	if (code->index)
 		return -EINVAL;
-	code->code = MEDIA_BUS_FMT_SGRBG10_1X10;
 
+	code->code = MEDIA_BUS_FMT_SGRBG10_1X10;
 	return 0;
 }
 
@@ -1360,7 +1336,6 @@ static int t4ka3_probe(struct i2c_client *client)
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	sensor->flip = 0;
 
 	ret = t4ka3_init_controls(sensor);
 	if (ret)
@@ -1385,13 +1360,6 @@ err_pm_runtime:
 	return ret;
 }
 
-static const struct i2c_device_id t4ka3_id[] = {
-	{T4KA3_NAME, 0},
-	{ }
-};
-MODULE_DEVICE_TABLE(i2c, t4ka3_id);
-
-/*Temp ID, need change to official one after get from TOSHIBA*/
 static struct acpi_device_id t4ka3_acpi_match[] = {
 	{ "XMCC0003" },
 	{},
@@ -1400,15 +1368,13 @@ MODULE_DEVICE_TABLE(acpi, t4ka3_acpi_match);
 
 static struct i2c_driver t4ka3_driver = {
 	.driver = {
-		.name = T4KA3_NAME,
+		.name = "t4ka3",
 		.acpi_match_table = ACPI_PTR(t4ka3_acpi_match),
 		.pm = pm_sleep_ptr(&t4ka3_pm_ops),
 	},
 	.probe = t4ka3_probe,
 	.remove = t4ka3_remove,
-	.id_table = t4ka3_id,
 };
-
 module_i2c_driver(t4ka3_driver)
 
 MODULE_DESCRIPTION("A low-level driver for T4KA3 sensor");
