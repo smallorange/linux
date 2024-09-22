@@ -250,26 +250,6 @@ static const struct cci_reg_sequence t4ka3_init_config[] = {
 	{CCI_REG8(0x3398), 0x00}
 };
 
-/* Stream mode */
-static struct cci_reg_sequence const t4ka3_suspend[] = {
-	{CCI_REG8(0x0100), 0x0}
-};
-
-static struct cci_reg_sequence const t4ka3_streaming[] = {
-	{CCI_REG8(0x0100), 0x01}
-};
-
-/* GROUPED_PARAMETER_HOLD */
-static struct cci_reg_sequence const t4ka3_param_hold[] = {
-	{CCI_REG8(0x0104), 0x1},
-};
-
-static struct cci_reg_sequence const t4ka3_param_update[] = {
-	{CCI_REG8(0x0104), 0x0}
-};
-
-/* Settings */
-
 static struct cci_reg_sequence const t4ka3_736x496_30fps[] = {
 	{CCI_REG8(0x0112), 0x0A},
 	{CCI_REG8(0x0113), 0x0A},
@@ -1081,18 +1061,12 @@ static int t4ka3_s_stream(struct v4l2_subdev *sd, int enable)
 			goto error_unlock;
 		}
 
-		ret = cci_multi_reg_write(sensor->regmap, t4ka3_init_config,
-					  ARRAY_SIZE(t4ka3_init_config), NULL);
-		if (ret)
-			goto error_powerdown;
-
+		cci_multi_reg_write(sensor->regmap, t4ka3_init_config,
+				    ARRAY_SIZE(t4ka3_init_config), &ret);
 		/* enable group hold */
-		ret = cci_multi_reg_write(sensor->regmap, t4ka3_param_hold,
-					  ARRAY_SIZE(t4ka3_param_hold), NULL);
-		if (ret)
-			goto error_powerdown;
-
-		ret = cci_multi_reg_write(sensor->regmap, sensor->res->regs, sensor->res->regs_len, NULL);
+		cci_write(sensor->regmap, T4KA3_REG_PARAM_HOLD, 1, &ret);
+		cci_multi_reg_write(sensor->regmap, sensor->res->regs,
+				    sensor->res->regs_len, &ret);
 		if (ret)
 			goto error_powerdown;
 
@@ -1102,26 +1076,16 @@ static int t4ka3_s_stream(struct v4l2_subdev *sd, int enable)
 			goto error_powerdown;
 
 		/* disable group hold */
-		ret = cci_multi_reg_write(sensor->regmap, t4ka3_param_update,
-					  ARRAY_SIZE(t4ka3_param_update), NULL);
+		cci_write(sensor->regmap, T4KA3_REG_PARAM_HOLD, 0, &ret);
+		cci_write(sensor->regmap, T4KA3_REG_STREAM, 1, &ret);
 		if (ret)
 			goto error_powerdown;
 
-		ret = cci_multi_reg_write(sensor->regmap, t4ka3_streaming,
-					  ARRAY_SIZE(t4ka3_streaming), NULL);
-		if (ret) {
-			dev_err (&client->dev, "Error on setting reg\n");
-			goto error_powerdown;
-		}
-
 		sensor->streaming = 1;
 	} else {
-		ret = cci_multi_reg_write(sensor->regmap, t4ka3_suspend,
-					  ARRAY_SIZE(t4ka3_suspend), NULL);
-		if (ret) {
-			dev_err(&client->dev, "Error on writing streaming config\n");
+		ret = cci_write(sensor->regmap, T4KA3_REG_STREAM, 0, NULL);
+		if (ret)
 			goto error_powerdown;
-		}
 
 		ret = pm_runtime_put(sensor->sd.dev);
 		if (ret)
