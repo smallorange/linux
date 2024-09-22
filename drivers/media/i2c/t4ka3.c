@@ -1140,23 +1140,8 @@ t4ka3_get_pad_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int t4ka3_g_skip_frames(struct v4l2_subdev *sd, u32 *frames)
-{
-	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
-
-	mutex_lock(&sensor->lock);
-	*frames = sensor->res->skip_frames;
-	mutex_unlock(&sensor->lock);
-
-	return 0;
-}
-
 static struct v4l2_ctrl_ops t4ka3_ctrl_ops = {
 	.s_ctrl = t4ka3_s_ctrl,
-};
-
-static const struct v4l2_subdev_sensor_ops t4ka3_sensor_ops = {
-	.g_skip_frames = t4ka3_g_skip_frames,
 };
 
 static const struct v4l2_subdev_video_ops t4ka3_video_ops = {
@@ -1173,7 +1158,6 @@ static const struct v4l2_subdev_pad_ops t4ka3_pad_ops = {
 static const struct v4l2_subdev_ops t4ka3_ops = {
 	.video = &t4ka3_video_ops,
 	.pad = &t4ka3_pad_ops,
-	.sensor = &t4ka3_sensor_ops,
 };
 
 static void t4ka3_remove(struct i2c_client *client)
