@@ -41,10 +41,10 @@
 #define T4KA3_MIN_CROP_HEIGHT			2
 
 #define T4KA3_PIXELS_PER_LINE			3440
-#define T4KA3_LINES_PER_FRAME			2492
+#define T4KA3_LINES_PER_FRAME_30FPS		2492
 #define T4KA3_FPS				30
 #define T4KA3_PIXEL_RATE \
-	(T4KA3_PIXELS_PER_LINE * T4KA3_LINES_PER_FRAME * T4KA3_FPS)
+	(T4KA3_PIXELS_PER_LINE * T4KA3_LINES_PER_FRAME_30FPS * T4KA3_FPS)
 
 /*
  * TODO this really should be derived from the 19.2 MHz xvclk combined
@@ -56,6 +56,9 @@
  * bpp = 10 and lanes = 4
  */
 #define T4KA3_LINK_FREQ				((s64)T4KA3_PIXEL_RATE * 10 / 8)
+
+/* For enum_frame_size() full-size + binned-/quarter-size */
+#define T4KA3_FRAME_SIZES			2
 
 
 #define T4KA3_REG_PRODUCT_ID_HIGH		CCI_REG8(0x0000)
@@ -97,14 +100,10 @@
 #define T4KA3_REG_WIN_WIDTH			CCI_REG16(0x040c)
 #define T4KA3_REG_WIN_HEIGHT			CCI_REG16(0x040e)
 #define T4KA3_REG_TEST_PATTERN_MODE		CCI_REG8(0x0601)
-
-struct t4ka3_resolution {
-	const struct cci_reg_sequence *regs;
-	int width;
-	int height;
-	int regs_len;
-	u32 skip_frames;
-};
+/* Unknown register at address 0x0900 */
+#define T4KA3_REG_0900				CCI_REG8(0x0900)
+#define T4KA3_REG_BINNING			CCI_REG8(0x0901)
+#define T4KA3_BINNING_VAL(b)			(((b) << 4) | (b))
 
 struct t4ka3_ctrls {
 	struct v4l2_ctrl_handler handler;
@@ -118,34 +117,27 @@ struct t4ka3_ctrls {
 	struct v4l2_ctrl *gain;
 };
 
+struct t4ka3_mode {
+	struct v4l2_rect		crop;
+	struct v4l2_mbus_framefmt	fmt;
+	int				binning;
+	u16				win_x;
+	u16				win_y;
+};
+
 struct t4ka3_data {
 	struct v4l2_subdev sd;
 	struct media_pad pad;
-	struct v4l2_mbus_framefmt format;
 	struct mutex lock; /* serialize sensor's ioctl */
 	struct t4ka3_ctrls ctrls;
+	struct t4ka3_mode mode;
 	struct device *dev;
 	struct regmap *regmap;
 	struct gpio_desc *powerdown_gpio;
 	struct gpio_desc *reset_gpio;
 	s64 link_freq[1];
-	const struct t4ka3_resolution *res;
 	int streaming;
 };
-
-/**
- * struct t4ka3_reg - MI sensor  register format
- * @reg: 16-bit offset to register
- * @val: 8/16/32-bit register value
- *
- * Define a structure for sensor register initialization values
- */
-struct t4ka3_reg {
-	u16 sreg;
-	u32 val;	/* @set value for read/mod/write, @mask */
-};
-
-#define to_t4ka3_sensor(x) container_of(x, struct t4ka3_data, sd)
 
 /* init settings */
 static const struct cci_reg_sequence t4ka3_init_config[] = {
@@ -232,7 +224,7 @@ static const struct cci_reg_sequence t4ka3_init_config[] = {
 	{CCI_REG8(0x3398), 0x00}
 };
 
-static struct cci_reg_sequence const t4ka3_736x496_30fps[] = {
+static const struct cci_reg_sequence t4ka3_pre_mode_set_regs[] = {
 	{CCI_REG8(0x0112), 0x0A},
 	{CCI_REG8(0x0113), 0x0A},
 	{CCI_REG8(0x0114), 0x03},
@@ -248,32 +240,9 @@ static struct cci_reg_sequence const t4ka3_736x496_30fps[] = {
 	{CCI_REG8(0x0306), 0x02},
 	{CCI_REG8(0x0307), 0x18},
 	{CCI_REG8(0x030B), 0x01},
-	{CCI_REG8(0x034C), 0x02},
-	{CCI_REG8(0x034D), 0xE0},
-	{CCI_REG8(0x034E), 0x01},
-	{CCI_REG8(0x034F), 0xEE},
-	{CCI_REG8(0x0340), 0x09},
-	{CCI_REG8(0x0341), 0xBC},
-	{CCI_REG8(0x0342), 0x0D},
-	{CCI_REG8(0x0343), 0x70},
-	{CCI_REG8(0x0344), 0x00},
-	{CCI_REG8(0x0345), 0x00},
-	{CCI_REG8(0x0346), 0x00},
-	{CCI_REG8(0x0347), 0x00},
-	{CCI_REG8(0x0348), 0x0C},
-	{CCI_REG8(0x0349), 0xCF},
-	{CCI_REG8(0x034A), 0x09},
-	{CCI_REG8(0x034B), 0x9F},
-	{CCI_REG8(0x0408), 0x01},
-	{CCI_REG8(0x0409), 0x74},
-	{CCI_REG8(0x040A), 0x00},
-	{CCI_REG8(0x040B), 0xFA},
-	{CCI_REG8(0x040C), 0x02},
-	{CCI_REG8(0x040D), 0xE0},
-	{CCI_REG8(0x040E), 0x01},
-	{CCI_REG8(0x040F), 0xF0},
-	{CCI_REG8(0x0900), 0x01},
-	{CCI_REG8(0x0901), 0x22},
+};
+
+static const struct cci_reg_sequence t4ka3_post_mode_set_regs[] = {
 	{CCI_REG8(0x0902), 0x00},
 	{CCI_REG8(0x4220), 0x00},
 	{CCI_REG8(0x4222), 0x01},
@@ -284,466 +253,10 @@ static struct cci_reg_sequence const t4ka3_736x496_30fps[] = {
 	{CCI_REG8(0x3394), 0x10}
 };
 
-static struct cci_reg_sequence const t4ka3_896x736_30fps[] = {
-	{CCI_REG8(0x0112), 0x0A},
-	{CCI_REG8(0x0113), 0x0A},
-	{CCI_REG8(0x0114), 0x03},
-	{CCI_REG8(0x4136), 0x13},
-	{CCI_REG8(0x4137), 0x33},
-	{CCI_REG8(0x0820), 0x0A},
-	{CCI_REG8(0x0821), 0x0D},
-	{CCI_REG8(0x0822), 0x00},
-	{CCI_REG8(0x0823), 0x00},
-	{CCI_REG8(0x0301), 0x0A},
-	{CCI_REG8(0x0303), 0x01},
-	{CCI_REG8(0x0305), 0x04},
-	{CCI_REG8(0x0306), 0x02},
-	{CCI_REG8(0x0307), 0x18},
-	{CCI_REG8(0x030B), 0x01},
-	{CCI_REG8(0x034C), 0x03},
-	{CCI_REG8(0x034D), 0x80},
-	{CCI_REG8(0x034E), 0x02},
-	{CCI_REG8(0x034F), 0xDE},
-	{CCI_REG8(0x0340), 0x09},
-	{CCI_REG8(0x0341), 0xBC},
-	{CCI_REG8(0x0342), 0x0D},
-	{CCI_REG8(0x0343), 0x70},
-	{CCI_REG8(0x0344), 0x00},
-	{CCI_REG8(0x0345), 0x00},
-	{CCI_REG8(0x0346), 0x00},
-	{CCI_REG8(0x0347), 0x00},
-	{CCI_REG8(0x0348), 0x0C},
-	{CCI_REG8(0x0349), 0xCF},
-	{CCI_REG8(0x034A), 0x09},
-	{CCI_REG8(0x034B), 0x9F},
-	{CCI_REG8(0x0408), 0x01},
-	{CCI_REG8(0x0409), 0x74},
-	{CCI_REG8(0x040A), 0x00},
-	{CCI_REG8(0x040B), 0xFA},
-	{CCI_REG8(0x040C), 0x03},
-	{CCI_REG8(0x040D), 0x80},
-	{CCI_REG8(0x040E), 0x02},
-	{CCI_REG8(0x040F), 0xE0},
-	{CCI_REG8(0x0900), 0x01},
-	{CCI_REG8(0x0901), 0x22},
-	{CCI_REG8(0x0902), 0x00},
-	{CCI_REG8(0x4220), 0x00},
-	{CCI_REG8(0x4222), 0x01},
-	{CCI_REG8(0x3380), 0x01},
-	{CCI_REG8(0x3090), 0x88},
-	{CCI_REG8(0x3394), 0x20},
-	{CCI_REG8(0x3090), 0x08},
-	{CCI_REG8(0x3394), 0x10}
-};
-
-#if 0 /* unused */
-static struct t4ka3_reg const t4ka3_1296x736_30fps[] = {
-	{T4KA3_8BIT, 0x0112, 0x0A},
-	{T4KA3_8BIT, 0x0113, 0x0A},
-	{T4KA3_8BIT, 0x0114, 0x03},
-	{T4KA3_8BIT, 0x4136, 0x13},
-	{T4KA3_8BIT, 0x4137, 0x33},
-	{T4KA3_8BIT, 0x0820, 0x0A},
-	{T4KA3_8BIT, 0x0821, 0x0D},
-	{T4KA3_8BIT, 0x0822, 0x00},
-	{T4KA3_8BIT, 0x0823, 0x00},
-	{T4KA3_8BIT, 0x0301, 0x0A},
-	{T4KA3_8BIT, 0x0303, 0x01},
-	{T4KA3_8BIT, 0x0305, 0x04},
-	{T4KA3_8BIT, 0x0306, 0x02},
-	{T4KA3_8BIT, 0x0307, 0x18},
-	{T4KA3_8BIT, 0x030B, 0x01},
-	{T4KA3_8BIT, 0x034C, 0x05},
-	{T4KA3_8BIT, 0x034D, 0x10},
-	{T4KA3_8BIT, 0x034E, 0x02},
-	{T4KA3_8BIT, 0x034F, 0xDE},
-	{T4KA3_8BIT, 0x0340, 0x09},
-	{T4KA3_8BIT, 0x0341, 0xBC},
-	{T4KA3_8BIT, 0x0342, 0x0D},
-	{T4KA3_8BIT, 0x0343, 0x70},
-	{T4KA3_8BIT, 0x0344, 0x00},
-	{T4KA3_8BIT, 0x0345, 0x00},
-	{T4KA3_8BIT, 0x0346, 0x00},
-	{T4KA3_8BIT, 0x0347, 0x00},
-	{T4KA3_8BIT, 0x0348, 0x0C},
-	{T4KA3_8BIT, 0x0349, 0xCF},
-	{T4KA3_8BIT, 0x034A, 0x09},
-	{T4KA3_8BIT, 0x034B, 0x9F},
-	{T4KA3_8BIT, 0x0408, 0x00},
-	{T4KA3_8BIT, 0x0409, 0xAC},
-	{T4KA3_8BIT, 0x040A, 0x00},
-	{T4KA3_8BIT, 0x040B, 0xFA},
-	{T4KA3_8BIT, 0x040C, 0x05},
-	{T4KA3_8BIT, 0x040D, 0x10},
-	{T4KA3_8BIT, 0x040E, 0x02},
-	{T4KA3_8BIT, 0x040F, 0xE0},
-	{T4KA3_8BIT, 0x0900, 0x01},
-	{T4KA3_8BIT, 0x0901, 0x22},
-	{T4KA3_8BIT, 0x0902, 0x00},
-	{T4KA3_8BIT, 0x4220, 0x00},
-	{T4KA3_8BIT, 0x4222, 0x01},
-	{T4KA3_8BIT, 0x3380, 0x01},
-	{T4KA3_8BIT, 0x3090, 0x88},
-	{T4KA3_8BIT, 0x3394, 0x20},
-	{T4KA3_8BIT, 0x3090, 0x08},
-	{T4KA3_8BIT, 0x3394, 0x10},
-	{T4KA3_TOK_TERM, 0, 0 }
-};
-#endif
-
-#if 0 /* unused */
-static struct t4ka3_reg const t4ka3_1632x1224_30fps[] = {
-	{T4KA3_8BIT, 0x0112, 0x0A},
-	{T4KA3_8BIT, 0x0113, 0x0A},
-	{T4KA3_8BIT, 0x0114, 0x03},
-	{T4KA3_8BIT, 0x4136, 0x13},
-	{T4KA3_8BIT, 0x4137, 0x33},
-	{T4KA3_8BIT, 0x0820, 0x0A},
-	{T4KA3_8BIT, 0x0821, 0x0D},
-	{T4KA3_8BIT, 0x0822, 0x00},
-	{T4KA3_8BIT, 0x0823, 0x00},
-	{T4KA3_8BIT, 0x0301, 0x0A},
-	{T4KA3_8BIT, 0x0303, 0x01},
-	{T4KA3_8BIT, 0x0305, 0x04},
-	{T4KA3_8BIT, 0x0306, 0x02},
-	{T4KA3_8BIT, 0x0307, 0x18},
-	{T4KA3_8BIT, 0x030B, 0x01},
-	{T4KA3_8BIT, 0x034C, 0x06},
-	{T4KA3_8BIT, 0x034D, 0x60},
-	{T4KA3_8BIT, 0x034E, 0x04},
-	{T4KA3_8BIT, 0x034F, 0xC6},
-	{T4KA3_8BIT, 0x0340, 0x09},
-	{T4KA3_8BIT, 0x0341, 0xBC},
-	{T4KA3_8BIT, 0x0342, 0x0D},
-	{T4KA3_8BIT, 0x0343, 0x70},
-	{T4KA3_8BIT, 0x0344, 0x00},
-	{T4KA3_8BIT, 0x0345, 0x00},
-	{T4KA3_8BIT, 0x0346, 0x00},
-	{T4KA3_8BIT, 0x0347, 0x00},
-	{T4KA3_8BIT, 0x0348, 0x0C},
-	{T4KA3_8BIT, 0x0349, 0xCF},
-	{T4KA3_8BIT, 0x034A, 0x09},
-	{T4KA3_8BIT, 0x034B, 0x9F},
-	{T4KA3_8BIT, 0x0408, 0x00},
-	{T4KA3_8BIT, 0x0409, 0x04},
-	{T4KA3_8BIT, 0x040A, 0x00},
-	{T4KA3_8BIT, 0x040B, 0x06},
-	{T4KA3_8BIT, 0x040C, 0x06},
-	{T4KA3_8BIT, 0x040D, 0x60},
-	{T4KA3_8BIT, 0x040E, 0x04},
-	{T4KA3_8BIT, 0x040F, 0xC8},
-	{T4KA3_8BIT, 0x0900, 0x01},
-	{T4KA3_8BIT, 0x0901, 0x22},
-	{T4KA3_8BIT, 0x0902, 0x00},
-	{T4KA3_8BIT, 0x4220, 0x00},
-	{T4KA3_8BIT, 0x4222, 0x01},
-	{T4KA3_8BIT, 0x3380, 0x01},
-	{T4KA3_8BIT, 0x3090, 0x88},
-	{T4KA3_8BIT, 0x3394, 0x20},
-	{T4KA3_8BIT, 0x3090, 0x08},
-	{T4KA3_8BIT, 0x3394, 0x10},
-	{T4KA3_TOK_TERM, 0, 0 }
-};
-#endif
-
-static struct cci_reg_sequence const t4ka3_1936x1096_30fps[] = {
-	{CCI_REG8(0x0112), 0x0A},
-	{CCI_REG8(0x0113), 0x0A},
-	{CCI_REG8(0x0114), 0x03},
-	{CCI_REG8(0x4136), 0x13},
-	{CCI_REG8(0x4137), 0x33},
-	{CCI_REG8(0x0820), 0x0A},
-	{CCI_REG8(0x0821), 0x0D},
-	{CCI_REG8(0x0822), 0x00},
-	{CCI_REG8(0x0823), 0x00},
-	{CCI_REG8(0x0301), 0x0A},
-	{CCI_REG8(0x0303), 0x01},
-	{CCI_REG8(0x0305), 0x04},
-	{CCI_REG8(0x0306), 0x02},
-	{CCI_REG8(0x0307), 0x18},
-	{CCI_REG8(0x030B), 0x01},
-	{CCI_REG8(0x034C), 0x07},
-	{CCI_REG8(0x034D), 0x90},
-	{CCI_REG8(0x034E), 0x04},
-	{CCI_REG8(0x034F), 0x46},
-	{CCI_REG8(0x0340), 0x09},
-	{CCI_REG8(0x0341), 0xBC},
-	{CCI_REG8(0x0342), 0x0D},
-	{CCI_REG8(0x0343), 0x70},
-	{CCI_REG8(0x0344), 0x00},
-	{CCI_REG8(0x0345), 0x00},
-	{CCI_REG8(0x0346), 0x00},
-	{CCI_REG8(0x0347), 0x00},
-	{CCI_REG8(0x0348), 0x0c},
-	{CCI_REG8(0x0349), 0xCF},
-	{CCI_REG8(0x034A), 0x09},
-	{CCI_REG8(0x034B), 0x9F},
-	{CCI_REG8(0x0408), 0x02},
-	{CCI_REG8(0x0409), 0xA0},
-	{CCI_REG8(0x040A), 0x02},
-	{CCI_REG8(0x040B), 0xAE},
-	{CCI_REG8(0x040C), 0x07},
-	{CCI_REG8(0x040D), 0x90},
-	{CCI_REG8(0x040E), 0x04},
-	{CCI_REG8(0x040F), 0x4B}, /* Should be 0x48 ? */
-	{CCI_REG8(0x0900), 0x01},
-	{CCI_REG8(0x0901), 0x11},
-	{CCI_REG8(0x0902), 0x00},
-	{CCI_REG8(0x4220), 0x00},
-	{CCI_REG8(0x4222), 0x01},
-	{CCI_REG8(0x3380), 0x01},
-	{CCI_REG8(0x3090), 0x88},
-	{CCI_REG8(0x3394), 0x20},
-	{CCI_REG8(0x3090), 0x08},
-	{CCI_REG8(0x3394), 0x10}
-};
-
-#if 0 /* unused */
-static struct t4ka3_reg const t4ka3_2064x1552_30fps[] = {
-	{T4KA3_8BIT, 0x0112, 0x0A},
-	{T4KA3_8BIT, 0x0113, 0x0A},
-	{T4KA3_8BIT, 0x0114, 0x03},
-	{T4KA3_8BIT, 0x4136, 0x13},
-	{T4KA3_8BIT, 0x4137, 0x33},
-	{T4KA3_8BIT, 0x0820, 0x0A},
-	{T4KA3_8BIT, 0x0821, 0x0D},
-	{T4KA3_8BIT, 0x0822, 0x00},
-	{T4KA3_8BIT, 0x0823, 0x00},
-	{T4KA3_8BIT, 0x0301, 0x0A},
-	{T4KA3_8BIT, 0x0303, 0x01},
-	{T4KA3_8BIT, 0x0305, 0x04},
-	{T4KA3_8BIT, 0x0306, 0x02},
-	{T4KA3_8BIT, 0x0307, 0x18},
-	{T4KA3_8BIT, 0x030B, 0x01},
-	{T4KA3_8BIT, 0x034C, 0x08},
-	{T4KA3_8BIT, 0x034D, 0x10},
-	{T4KA3_8BIT, 0x034E, 0x06},
-	{T4KA3_8BIT, 0x034F, 0x0E},
-	{T4KA3_8BIT, 0x0340, 0x09},
-	{T4KA3_8BIT, 0x0341, 0xBC},
-	{T4KA3_8BIT, 0x0342, 0x0D},
-	{T4KA3_8BIT, 0x0343, 0x70},
-	{T4KA3_8BIT, 0x0344, 0x00},
-	{T4KA3_8BIT, 0x0345, 0x00},
-	{T4KA3_8BIT, 0x0346, 0x00},
-	{T4KA3_8BIT, 0x0347, 0x00},
-	{T4KA3_8BIT, 0x0348, 0x0C},
-	{T4KA3_8BIT, 0x0349, 0xCF},
-	{T4KA3_8BIT, 0x034A, 0x09},
-	{T4KA3_8BIT, 0x034B, 0x9F},
-	{T4KA3_8BIT, 0x0408, 0x02},
-	{T4KA3_8BIT, 0x0409, 0x60},
-	{T4KA3_8BIT, 0x040A, 0x01},
-	{T4KA3_8BIT, 0x040B, 0xCA},
-	{T4KA3_8BIT, 0x040C, 0x08},
-	{T4KA3_8BIT, 0x040D, 0x10},
-	{T4KA3_8BIT, 0x040E, 0x06},
-	{T4KA3_8BIT, 0x040F, 0x10},
-	{T4KA3_8BIT, 0x0900, 0x01},
-	{T4KA3_8BIT, 0x0901, 0x11},
-	{T4KA3_8BIT, 0x0902, 0x00},
-	{T4KA3_8BIT, 0x4220, 0x00},
-	{T4KA3_8BIT, 0x4222, 0x01},
-	{T4KA3_8BIT, 0x3380, 0x01},
-	{T4KA3_8BIT, 0x3090, 0x88},
-	{T4KA3_8BIT, 0x3394, 0x20},
-	{T4KA3_8BIT, 0x3090, 0x08},
-	{T4KA3_8BIT, 0x3394, 0x10},
-	{T4KA3_TOK_TERM, 0, 0 }
-};
-#endif
-
-#if 0 /* unused */
-static struct t4ka3_reg const t4ka3_2576x1936_30fps[] = {
-	{T4KA3_8BIT, 0x0112, 0x0A},
-	{T4KA3_8BIT, 0x0113, 0x0A},
-	{T4KA3_8BIT, 0x0114, 0x03},
-	{T4KA3_8BIT, 0x4136, 0x13},
-	{T4KA3_8BIT, 0x4137, 0x33},
-	{T4KA3_8BIT, 0x0820, 0x0A},
-	{T4KA3_8BIT, 0x0821, 0x0D},
-	{T4KA3_8BIT, 0x0822, 0x00},
-	{T4KA3_8BIT, 0x0823, 0x00},
-	{T4KA3_8BIT, 0x0301, 0x0A},
-	{T4KA3_8BIT, 0x0303, 0x01},
-	{T4KA3_8BIT, 0x0305, 0x04},
-	{T4KA3_8BIT, 0x0306, 0x02},
-	{T4KA3_8BIT, 0x0307, 0x18},
-	{T4KA3_8BIT, 0x030B, 0x01},
-	{T4KA3_8BIT, 0x034C, 0x0A},
-	{T4KA3_8BIT, 0x034D, 0x10},
-	{T4KA3_8BIT, 0x034E, 0x07},
-	{T4KA3_8BIT, 0x034F, 0x8E},
-	{T4KA3_8BIT, 0x0340, 0x09},
-	{T4KA3_8BIT, 0x0341, 0xBC},
-	{T4KA3_8BIT, 0x0342, 0x0D},
-	{T4KA3_8BIT, 0x0343, 0x70},
-	{T4KA3_8BIT, 0x0344, 0x00},
-	{T4KA3_8BIT, 0x0345, 0x00},
-	{T4KA3_8BIT, 0x0346, 0x00},
-	{T4KA3_8BIT, 0x0347, 0x00},
-	{T4KA3_8BIT, 0x0348, 0x0C},
-	{T4KA3_8BIT, 0x0349, 0xCF},
-	{T4KA3_8BIT, 0x034A, 0x09},
-	{T4KA3_8BIT, 0x034B, 0x9F},
-	{T4KA3_8BIT, 0x0408, 0x01},
-	{T4KA3_8BIT, 0x0409, 0x60},
-	{T4KA3_8BIT, 0x040A, 0x01},
-	{T4KA3_8BIT, 0x040B, 0x0A},
-	{T4KA3_8BIT, 0x040C, 0x0A},
-	{T4KA3_8BIT, 0x040D, 0x10},
-	{T4KA3_8BIT, 0x040E, 0x07},
-	{T4KA3_8BIT, 0x040F, 0x90},
-	{T4KA3_8BIT, 0x0900, 0x01},
-	{T4KA3_8BIT, 0x0901, 0x11},
-	{T4KA3_8BIT, 0x0902, 0x00},
-	{T4KA3_8BIT, 0x4220, 0x00},
-	{T4KA3_8BIT, 0x4222, 0x01},
-	{T4KA3_8BIT, 0x3380, 0x01},
-	{T4KA3_8BIT, 0x3090, 0x88},
-	{T4KA3_8BIT, 0x3394, 0x20},
-	{T4KA3_8BIT, 0x3090, 0x08},
-	{T4KA3_8BIT, 0x3394, 0x10},
-	{T4KA3_TOK_TERM, 0, 0 }
-};
-#endif
-
-#if 0 /* unused */
-static struct t4ka3_reg const t4ka3_3280x1852_30fps[] = {
-	{T4KA3_8BIT, 0x0112, 0x0A},
-	{T4KA3_8BIT, 0x0113, 0x0A},
-	{T4KA3_8BIT, 0x0114, 0x03},
-	{T4KA3_8BIT, 0x4136, 0x13},
-	{T4KA3_8BIT, 0x4137, 0x33},
-	{T4KA3_8BIT, 0x0820, 0x0A},
-	{T4KA3_8BIT, 0x0821, 0x0D},
-	{T4KA3_8BIT, 0x0822, 0x00},
-	{T4KA3_8BIT, 0x0823, 0x00},
-	{T4KA3_8BIT, 0x0301, 0x0A},
-	{T4KA3_8BIT, 0x0303, 0x01},
-	{T4KA3_8BIT, 0x0305, 0x04},
-	{T4KA3_8BIT, 0x0306, 0x02},
-	{T4KA3_8BIT, 0x0307, 0x18},
-	{T4KA3_8BIT, 0x030B, 0x01},
-	{T4KA3_8BIT, 0x034C, 0x0C},
-	{T4KA3_8BIT, 0x034D, 0xD0},
-	{T4KA3_8BIT, 0x034E, 0x07},
-	{T4KA3_8BIT, 0x034F, 0x3A},
-	{T4KA3_8BIT, 0x0340, 0x09},
-	{T4KA3_8BIT, 0x0341, 0xBC},
-	{T4KA3_8BIT, 0x0342, 0x0D},
-	{T4KA3_8BIT, 0x0343, 0x70},
-	{T4KA3_8BIT, 0x0344, 0x00},
-	{T4KA3_8BIT, 0x0345, 0x00},
-	{T4KA3_8BIT, 0x0346, 0x00},
-	{T4KA3_8BIT, 0x0347, 0x00},
-	{T4KA3_8BIT, 0x0348, 0x0C},
-	{T4KA3_8BIT, 0x0349, 0xCF},
-	{T4KA3_8BIT, 0x034A, 0x09},
-	{T4KA3_8BIT, 0x034B, 0x9f},
-	{T4KA3_8BIT, 0x0408, 0x00},
-	{T4KA3_8BIT, 0x0409, 0x00},
-	{T4KA3_8BIT, 0x040A, 0x01},
-	{T4KA3_8BIT, 0x040B, 0x34},
-	{T4KA3_8BIT, 0x040C, 0x0C},
-	{T4KA3_8BIT, 0x040D, 0xD0},
-	{T4KA3_8BIT, 0x040E, 0x07},
-	{T4KA3_8BIT, 0x040F, 0x3C},
-	{T4KA3_8BIT, 0x0900, 0x01},
-	{T4KA3_8BIT, 0x0901, 0x11},
-	{T4KA3_8BIT, 0x0902, 0x00},
-	{T4KA3_8BIT, 0x4220, 0x00},
-	{T4KA3_8BIT, 0x4222, 0x01},
-	{T4KA3_8BIT, 0x3380, 0x01},
-	{T4KA3_8BIT, 0x3090, 0x88},
-	{T4KA3_8BIT, 0x3394, 0x20},
-	{T4KA3_8BIT, 0x3090, 0x08},
-	{T4KA3_8BIT, 0x3394, 0x10},
-	{T4KA3_TOK_TERM, 0, 0 }
-};
-#endif
-
-static struct cci_reg_sequence const t4ka3_3280x2464_30fps[] = {
-	{CCI_REG8(0x0112), 0x0A},
-	{CCI_REG8(0x0113), 0x0A},
-	{CCI_REG8(0x0114), 0x03},
-	{CCI_REG8(0x4136), 0x13},
-	{CCI_REG8(0x4137), 0x33},
-	{CCI_REG8(0x0820), 0x0A},
-	{CCI_REG8(0x0821), 0x0D},
-	{CCI_REG8(0x0822), 0x00},
-	{CCI_REG8(0x0823), 0x00},
-	{CCI_REG8(0x0301), 0x0A},
-	{CCI_REG8(0x0303), 0x01},
-	{CCI_REG8(0x0305), 0x04},
-	{CCI_REG8(0x0306), 0x02},
-	{CCI_REG8(0x0307), 0x18},
-	{CCI_REG8(0x030B), 0x01},
-	{CCI_REG8(0x034C), 0x0C}, /* horizontal output size 3280 */
-	{CCI_REG8(0x034D), 0xD0},
-	{CCI_REG8(0x034E), 0x09}, /* vertical output size 2662 */
-	{CCI_REG8(0x034F), 0x9E},
-	{CCI_REG8(0x0340), 0x09}, /* vts / lines per frame 2492 */
-	{CCI_REG8(0x0341), 0xBC},
-	{CCI_REG8(0x0342), 0x0D}, /* hts / pixels per line 3440 */
-	{CCI_REG8(0x0343), 0x70},
-	{CCI_REG8(0x0344), 0x00},
-	{CCI_REG8(0x0345), 0x00},
-	{CCI_REG8(0x0346), 0x00},
-	{CCI_REG8(0x0347), 0x00},
-	{CCI_REG8(0x0348), 0x0C}, /* horizontal end 3279 */
-	{CCI_REG8(0x0349), 0xCF},
-	{CCI_REG8(0x034A), 0x09}, /* vertical end 2463 */
-	{CCI_REG8(0x034B), 0x9F},
-	{CCI_REG8(0x0408), 0x00},
-	{CCI_REG8(0x0409), 0x00},
-	{CCI_REG8(0x040A), 0x00},
-	{CCI_REG8(0x040B), 0x02},
-	{CCI_REG8(0x040C), 0x0C},
-	{CCI_REG8(0x040D), 0xD0},
-	{CCI_REG8(0x040E), 0x09},
-	{CCI_REG8(0x040F), 0xA0},
-	{CCI_REG8(0x0900), 0x01},
-	{CCI_REG8(0x0901), 0x11},
-	{CCI_REG8(0x0902), 0x00},
-	{CCI_REG8(0x4220), 0x00},
-	{CCI_REG8(0x4222), 0x01},
-	{CCI_REG8(0x3380), 0x01},
-	{CCI_REG8(0x3090), 0x88},
-	{CCI_REG8(0x3394), 0x20},
-	{CCI_REG8(0x3090), 0x08},
-	{CCI_REG8(0x3394), 0x10}
-};
-
-const struct t4ka3_resolution t4ka3_res[] = {
-
-	{
-		.regs = t4ka3_736x496_30fps,
-		.regs_len = ARRAY_SIZE(t4ka3_736x496_30fps),
-		.width = 736,
-		.height = 496,
-		.skip_frames = 2,
-	},
-	{
-		.regs = t4ka3_896x736_30fps,
-		.regs_len = ARRAY_SIZE(t4ka3_896x736_30fps),
-		.width = 896,
-		.height = 736,
-		.skip_frames = 2,
-	},
-	{
-		.regs = t4ka3_1936x1096_30fps,
-		.regs_len = ARRAY_SIZE(t4ka3_1936x1096_30fps),
-		.width = 1936,
-		.height = 1096,
-		.skip_frames = 2,
-	},
-/*	{
-		.regs = t4ka3_3280x2464_30fps,
-		.width = 3280,
-		.height = 2464,
-	}, */
-};
+static inline struct t4ka3_data *to_t4ka3_sensor(struct v4l2_subdev *sd)
+{
+	return container_of(sd, struct t4ka3_data, sd);
+}
 
 static inline struct t4ka3_data *ctrl_to_t4ka3(struct v4l2_ctrl *ctrl)
 {
@@ -756,6 +269,13 @@ static const int t4ka3_hv_flip_bayer_order[] = {
 	MEDIA_BUS_FMT_SBGGR10_1X10,
 	MEDIA_BUS_FMT_SRGGB10_1X10,
 	MEDIA_BUS_FMT_SGBRG10_1X10,
+};
+
+static const struct v4l2_rect t4ka3_default_crop = {
+	.left = T4KA3_ACTIVE_START_LEFT,
+	.top = T4KA3_ACTIVE_START_TOP,
+	.width = T4KA3_ACTIVE_WIDTH,
+	.height = T4KA3_ACTIVE_HEIGHT,
 };
 
 static int t4ka3_detect(struct t4ka3_data *sensor, u16 *id);
@@ -776,11 +296,34 @@ static void t4ka3_set_bayer_order(struct t4ka3_data *sensor,
 
 static int t4ka3_update_exposure_range(struct t4ka3_data *sensor)
 {
-	int exp_max = sensor->format.height + sensor->ctrls.vblank->val -
+	int exp_max = sensor->mode.fmt.height + sensor->ctrls.vblank->val -
 		      T4KA3_COARSE_INTEGRATION_TIME_MARGIN;
 
 	return __v4l2_ctrl_modify_range(sensor->ctrls.exposure, 0, exp_max,
 					1, exp_max);
+}
+
+static struct v4l2_rect *
+__t4ka3_get_pad_crop(struct t4ka3_data *sensor,
+		      struct v4l2_subdev_state *state,
+		      unsigned int pad,
+		      enum v4l2_subdev_format_whence which)
+{
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		return v4l2_subdev_state_get_crop(state, pad);
+
+	return &sensor->mode.crop;
+}
+
+static struct v4l2_mbus_framefmt *
+__t4ka3_get_pad_format(struct t4ka3_data *sensor,
+		       struct v4l2_subdev_state *sd_state, unsigned int pad,
+		       enum v4l2_subdev_format_whence which)
+{
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		return v4l2_subdev_state_get_format(sd_state, pad);
+
+	return &sensor->mode.fmt;
 }
 
 static void t4ka3_fill_format(struct t4ka3_data *sensor,
@@ -795,34 +338,79 @@ static void t4ka3_fill_format(struct t4ka3_data *sensor,
 	t4ka3_set_bayer_order(sensor, fmt);
 }
 
+static void t4ka3_calc_mode(struct t4ka3_data *sensor)
+{
+	int width = sensor->mode.fmt.width;
+	int height = sensor->mode.fmt.height;
+	int binning;
+
+	if (width  <= (sensor->mode.crop.width / 2) &&
+	    height <= (sensor->mode.crop.height / 2))
+		binning = 2;
+	else
+		binning = 1;
+
+	width *= binning;
+	height *= binning;
+
+	sensor->mode.binning = binning;
+	sensor->mode.win_x = (sensor->mode.crop.left +
+				(sensor->mode.crop.width - width) / 2) & ~1;
+	sensor->mode.win_y = (sensor->mode.crop.top +
+				(sensor->mode.crop.height - height) / 2) & ~1;
+	/*
+	 * t4ka's window is done after binning, but must still be a multiple of 2 ?
+	 * Round up to avoid top 2 black lines in 1640x1230 (quarter res) case.
+	 */
+	sensor->mode.win_x = DIV_ROUND_UP(sensor->mode.win_x, binning);
+	sensor->mode.win_y = DIV_ROUND_UP(sensor->mode.win_y, binning);
+}
+
+static void t4ka3_get_vblank_limits(struct t4ka3_data *sensor, int *min, int *max, int *def)
+{
+	*min = T4KA3_MIN_VBLANK + (sensor->mode.binning - 1) * sensor->mode.fmt.height;
+	*max = T4KA3_MAX_VBLANK - sensor->mode.fmt.height;
+	*def = T4KA3_LINES_PER_FRAME_30FPS - sensor->mode.fmt.height;
+}
+
 static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_format *format)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
-	struct v4l2_mbus_framefmt *fmt = &format->format;
-	const struct t4ka3_resolution *res;
-	int def, max, ret;
+	struct v4l2_mbus_framefmt *try_fmt;
+	const struct v4l2_rect *crop;
+	unsigned int width, height;
+	int min, max, def, ret = 0;
 
-	dev_info(&client->dev, "enter t4ka3_set_mbus_fmt\n");
+	crop = __t4ka3_get_pad_crop(sensor, sd_state, format->pad, format->which);
 
-	res = v4l2_find_nearest_size(t4ka3_res, ARRAY_SIZE(t4ka3_res),
-				     width, height, fmt->width, fmt->height);
-	t4ka3_fill_format(sensor, fmt, res->width, res->height);
+	/* Limit set_fmt max size to crop width / height */
+	width = clamp_val(ALIGN(format->format.width, 2),
+			  T4KA3_MIN_CROP_WIDTH, crop->width);
+	height = clamp_val(ALIGN(format->format.height, 2),
+			   T4KA3_MIN_CROP_HEIGHT, crop->height);
+	t4ka3_fill_format(sensor, &format->format, width, height);
 
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+		try_fmt = v4l2_subdev_state_get_format(sd_state, 0);
+		*try_fmt = format->format;
 		return 0;
+	}
 
 	mutex_lock(&sensor->lock);
-	sensor->res = res;
-	sensor->format = *fmt;
+
+	if (sensor->streaming) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	sensor->mode.fmt = format->format;
+	t4ka3_calc_mode(sensor);
 
 	/* vblank range is height dependent adjust and reset to default */
-	max = T4KA3_MAX_VBLANK - res->height;
-	def = T4KA3_LINES_PER_FRAME - res->height;
-	ret = __v4l2_ctrl_modify_range(sensor->ctrls.vblank, T4KA3_MIN_VBLANK,
-				       max, 1, def);
+	t4ka3_get_vblank_limits(sensor, &min, &max, &def);
+	ret = __v4l2_ctrl_modify_range(sensor->ctrls.vblank, min, max, 1, def);
 	if (ret)
 		goto unlock;
 
@@ -830,7 +418,7 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 	if (ret)
 		goto unlock;
 
-	def = T4KA3_ACTIVE_WIDTH - res->width;
+	def = T4KA3_ACTIVE_WIDTH - sensor->mode.fmt.width;
 	ret = __v4l2_ctrl_modify_range(sensor->ctrls.hblank, def, def, 1, def);
 	if (ret)
 		goto unlock;
@@ -842,8 +430,6 @@ static int t4ka3_set_pad_format(struct v4l2_subdev *sd,
 	ret = t4ka3_update_exposure_range(sensor);
 	if (ret)
 		goto unlock;
-
-	dev_info(&client->dev, "width %d , height %d\n", res->width, res->height);
 
 unlock:
 	mutex_unlock(&sensor->lock);
@@ -867,7 +453,7 @@ static int t4ka3_t_hflip(struct v4l2_subdev *sd, int value)
 	if (ret)
 		return ret;
 
-	t4ka3_set_bayer_order(sensor, &sensor->format);
+	t4ka3_set_bayer_order(sensor, &sensor->mode.fmt);
 	return 0;
 }
 
@@ -888,7 +474,7 @@ static int t4ka3_t_vflip(struct v4l2_subdev *sd, int value)
 	if (ret)
 		return ret;
 
-	t4ka3_set_bayer_order(sensor, &sensor->format);
+	t4ka3_set_bayer_order(sensor, &sensor->mode.fmt);
 	return 0;
 }
 
@@ -972,7 +558,7 @@ static int t4ka3_s_ctrl(struct v4l2_ctrl *ctrl)
 
 	/* Only apply changes to the controls if the device is powered up */
 	if (!pm_runtime_get_if_in_use(sensor->sd.dev)) {
-		t4ka3_set_bayer_order(sensor, &sensor->format);
+		t4ka3_set_bayer_order(sensor, &sensor->mode.fmt);
 		return 0;
 	}
 
@@ -996,7 +582,7 @@ static int t4ka3_s_ctrl(struct v4l2_ctrl *ctrl)
 		dev_dbg(&client->dev, "%s: V4L2_CID_VBLANK: %d\n",
 			__func__, ctrl->val);
 		ret = cci_write(sensor->regmap, T4KA3_REG_FRAME_LENGTH_LINES,
-				sensor->format.height + ctrl->val, NULL);
+				sensor->mode.fmt.height + ctrl->val, NULL);
 		break;
 	case V4L2_CID_EXPOSURE:
 		ret = cci_write(sensor->regmap, T4KA3_REG_COARSE_INTEGRATION_TIME,
@@ -1012,6 +598,41 @@ static int t4ka3_s_ctrl(struct v4l2_ctrl *ctrl)
 	}
 
 	pm_runtime_put(sensor->sd.dev);
+	return ret;
+}
+
+/* Window/crop start + size *after* binning */
+#define T4KA3_REG_WIN_START_X			CCI_REG16(0x0408)
+#define T4KA3_REG_WIN_START_Y			CCI_REG16(0x040a)
+#define T4KA3_REG_WIN_WIDTH			CCI_REG16(0x040c)
+#define T4KA3_REG_WIN_HEIGHT			CCI_REG16(0x040e)
+#define T4KA3_REG_TEST_PATTERN_MODE		CCI_REG8(0x0601)
+/* Unknown register at address 0x0900 */
+#define T4KA3_REG_0900				CCI_REG8(0x0900)
+static int t4ka3_set_mode(struct t4ka3_data *sensor)
+{
+	int ret = 0;
+
+	cci_write(sensor->regmap, T4KA3_REG_HORZ_OUTPUT_SIZE, sensor->mode.fmt.width, &ret);
+	/* Write mode-height - 2 otherwise things don't work, hw-bug ? */
+	cci_write(sensor->regmap, T4KA3_REG_VERT_OUTPUT_SIZE, sensor->mode.fmt.height - 2, &ret);
+	/* Note overwritten by __v4l2_ctrl_handler_setup() based on vblank ctrl */
+	cci_write(sensor->regmap, T4KA3_REG_FRAME_LENGTH_LINES, T4KA3_LINES_PER_FRAME_30FPS, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_PIXELS_PER_LINE, T4KA3_PIXELS_PER_LINE, &ret);
+	/* Always use the full sensor, using window to crop */
+	cci_write(sensor->regmap, T4KA3_REG_HORZ_START, 0, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_VERT_START, 0, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_HORZ_END, T4KA3_NATIVE_WIDTH - 1, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_VERT_END, T4KA3_NATIVE_HEIGHT - 1, &ret);
+	/* Set window */
+	cci_write(sensor->regmap, T4KA3_REG_WIN_START_X, sensor->mode.win_x, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_WIN_START_Y, sensor->mode.win_y, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_WIN_WIDTH, sensor->mode.fmt.width, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_WIN_HEIGHT, sensor->mode.fmt.height, &ret);
+	/* Write 1 to unknown register 0x0900 */
+	cci_write(sensor->regmap, T4KA3_REG_0900, 1, &ret);
+	cci_write(sensor->regmap, T4KA3_REG_BINNING, T4KA3_BINNING_VAL(sensor->mode.binning), &ret);
+
 	return ret;
 }
 
@@ -1041,8 +662,17 @@ static int t4ka3_s_stream(struct v4l2_subdev *sd, int enable)
 				    ARRAY_SIZE(t4ka3_init_config), &ret);
 		/* enable group hold */
 		cci_write(sensor->regmap, T4KA3_REG_PARAM_HOLD, 1, &ret);
-		cci_multi_reg_write(sensor->regmap, sensor->res->regs,
-				    sensor->res->regs_len, &ret);
+		cci_multi_reg_write(sensor->regmap, t4ka3_pre_mode_set_regs,
+				    ARRAY_SIZE(t4ka3_pre_mode_set_regs), &ret);
+		if (ret)
+			goto error_powerdown;
+
+		ret = t4ka3_set_mode(sensor);
+		if (ret)
+			goto error_powerdown;
+
+		ret = cci_multi_reg_write(sensor->regmap, t4ka3_post_mode_set_regs,
+					  ARRAY_SIZE(t4ka3_post_mode_set_regs), NULL);
 		if (ret)
 			goto error_powerdown;
 
@@ -1080,10 +710,98 @@ error_unlock:
 	return ret;
 }
 
+static int t4ka3_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state,
+				struct v4l2_subdev_selection *sel)
+{
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+		mutex_lock(&sensor->lock);
+		sel->r = *__t4ka3_get_pad_crop(sensor, state, sel->pad,
+						sel->which);
+		mutex_unlock(&sensor->lock);
+		break;
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		sel->r.top = 0;
+		sel->r.left = 0;
+		sel->r.width = T4KA3_NATIVE_WIDTH;
+		sel->r.height = T4KA3_NATIVE_HEIGHT;
+		break;
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+		sel->r = t4ka3_default_crop;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int t4ka3_set_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state,
+				struct v4l2_subdev_selection *sel)
+{
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
+	struct v4l2_mbus_framefmt *format;
+	struct v4l2_rect *crop;
+	struct v4l2_rect rect;
+
+	if (sel->target != V4L2_SEL_TGT_CROP)
+		return -EINVAL;
+
+	/*
+	 * Clamp the boundaries of the crop rectangle to the size of the sensor
+	 * pixel array. Align to multiples of 2 to ensure Bayer pattern isn't
+	 * disrupted.
+	 */
+	rect.left = clamp_val(ALIGN(sel->r.left, 2),
+			      T4KA3_NATIVE_START_LEFT, T4KA3_NATIVE_WIDTH);
+	rect.top = clamp_val(ALIGN(sel->r.top, 2),
+			     T4KA3_NATIVE_START_TOP, T4KA3_NATIVE_HEIGHT);
+	rect.width = clamp_val(ALIGN(sel->r.width, 2),
+			       T4KA3_MIN_CROP_WIDTH, T4KA3_NATIVE_WIDTH);
+	rect.height = clamp_val(ALIGN(sel->r.height, 2),
+				T4KA3_MIN_CROP_HEIGHT, T4KA3_NATIVE_HEIGHT);
+
+	/* Make sure the crop rectangle isn't outside the bounds of the array */
+	rect.width = min_t(unsigned int, rect.width,
+			   T4KA3_NATIVE_WIDTH - rect.left);
+	rect.height = min_t(unsigned int, rect.height,
+			    T4KA3_NATIVE_HEIGHT - rect.top);
+
+	crop = __t4ka3_get_pad_crop(sensor, state, sel->pad, sel->which);
+
+	mutex_lock(&sensor->lock);
+
+	*crop = rect;
+
+	if (rect.width != crop->width || rect.height != crop->height) {
+		/*
+		 * Reset the output image size if the crop rectangle size has
+		 * been modified.
+		 */
+		format = __t4ka3_get_pad_format(sensor, state, sel->pad,
+						sel->which);
+		format->width = rect.width;
+		format->height = rect.height;
+		if (sel->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+			t4ka3_calc_mode(sensor);
+	}
+
+	mutex_unlock(&sensor->lock);
+
+	sel->r = rect;
+
+	return 0;
+}
+
 static int
 t4ka3_enum_mbus_code(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
-				struct v4l2_subdev_mbus_code_enum *code)
+		     struct v4l2_subdev_state *sd_state,
+		     struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->index)
 		return -EINVAL;
@@ -1092,51 +810,50 @@ t4ka3_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int
-t4ka3_enum_frame_size(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
-				struct v4l2_subdev_frame_size_enum *fse)
+static int t4ka3_enum_frame_size(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *sd_state,
+				 struct v4l2_subdev_frame_size_enum *fse)
 {
-	int index = fse->index;
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
+	struct v4l2_rect *crop;
 
-	if (index >= ARRAY_SIZE(t4ka3_res))
+	if (fse->index >= T4KA3_FRAME_SIZES)
 		return -EINVAL;
 
-	fse->min_width = t4ka3_res[index].width;
-	fse->min_height = t4ka3_res[index].height;
-	fse->max_width = t4ka3_res[index].width;
-	fse->max_height = t4ka3_res[index].height;
+	crop = __t4ka3_get_pad_crop(sensor, sd_state, fse->pad, fse->which);
+	if (!crop)
+		return -EINVAL;
+
+	fse->min_width = crop->width / (fse->index + 1);
+	fse->min_height = crop->height / (fse->index + 1);
+	fse->max_width = fse->min_width;
+	fse->max_height = fse->min_height;
 
 	return 0;
 }
 
-static struct v4l2_mbus_framefmt *
-__t4ka3_get_pad_format(struct t4ka3_data *sensor, struct v4l2_subdev *sd,
-			 struct v4l2_subdev_state *sd_state, unsigned int pad,
-			 enum v4l2_subdev_format_whence which)
-{
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_state_get_format(sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &sensor->format;
-	default:
-		return NULL;
-	}
-}
-
 static int
 t4ka3_get_pad_format(struct v4l2_subdev *sd,
-		       struct v4l2_subdev_state *sd_state,
-		       struct v4l2_subdev_format *fmt)
+		     struct v4l2_subdev_state *sd_state,
+		     struct v4l2_subdev_format *fmt)
 {
 	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
 	struct v4l2_mbus_framefmt *format =
-			__t4ka3_get_pad_format(sensor, sd, sd_state,
-						fmt->pad, fmt->which);
+		__t4ka3_get_pad_format(sensor, sd_state, fmt->pad, fmt->which);
 
 	fmt->format = *format;
+	return 0;
+}
 
+static int t4ka3_init_state(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_state *sd_state)
+{
+	struct t4ka3_data *sensor = to_t4ka3_sensor(sd);
+
+	*v4l2_subdev_state_get_crop(sd_state, 0) = t4ka3_default_crop;
+
+	t4ka3_fill_format(sensor, v4l2_subdev_state_get_format(sd_state, 0),
+			  T4KA3_ACTIVE_WIDTH, T4KA3_ACTIVE_HEIGHT);
 	return 0;
 }
 
@@ -1153,11 +870,17 @@ static const struct v4l2_subdev_pad_ops t4ka3_pad_ops = {
 	.enum_frame_size = t4ka3_enum_frame_size,
 	.get_fmt = t4ka3_get_pad_format,
 	.set_fmt = t4ka3_set_pad_format,
+	.get_selection = t4ka3_get_selection,
+	.set_selection = t4ka3_set_selection,
 };
 
 static const struct v4l2_subdev_ops t4ka3_ops = {
 	.video = &t4ka3_video_ops,
 	.pad = &t4ka3_pad_ops,
+};
+
+static const struct v4l2_subdev_internal_ops t4ka3_internal_ops = {
+	.init_state = t4ka3_init_state,
 };
 
 static void t4ka3_remove(struct i2c_client *client)
@@ -1176,7 +899,7 @@ static int t4ka3_init_controls(struct t4ka3_data *sensor)
 	const struct v4l2_ctrl_ops *ops = &t4ka3_ctrl_ops;
 	struct t4ka3_ctrls *ctrls = &sensor->ctrls;
 	struct v4l2_ctrl_handler *hdl = &ctrls->handler;
-	int def, max;
+	int min, max, def;
 	static const char * const test_pattern_menu[] = {
 		"Disabled",
 		"Solid White",
@@ -1199,16 +922,14 @@ static int t4ka3_init_controls(struct t4ka3_data *sensor)
 	ctrls->link_freq = v4l2_ctrl_new_int_menu(hdl, NULL, V4L2_CID_LINK_FREQ,
 						  0, 0, sensor->link_freq);
 
-	def = T4KA3_LINES_PER_FRAME - T4KA3_ACTIVE_HEIGHT;
-	max = T4KA3_MAX_VBLANK - T4KA3_ACTIVE_HEIGHT;
-	ctrls->vblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-					  T4KA3_MIN_VBLANK, max, 1, def);
+	t4ka3_get_vblank_limits(sensor, &min, &max, &def);
+	ctrls->vblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK, min, max, 1, def);
 
-	def = T4KA3_PIXELS_PER_LINE - sensor->format.width;
+	def = T4KA3_PIXELS_PER_LINE - sensor->mode.fmt.width;
 	ctrls->hblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 					  def, def, 1, def);
 
-	max = T4KA3_LINES_PER_FRAME - T4KA3_COARSE_INTEGRATION_TIME_MARGIN;
+	max = T4KA3_LINES_PER_FRAME_30FPS - T4KA3_COARSE_INTEGRATION_TIME_MARGIN;
 	ctrls->exposure = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE,
 					    0, max, 1, max);
 
@@ -1290,10 +1011,12 @@ static int t4ka3_probe(struct i2c_client *client)
 	mutex_init(&sensor->lock);
 
 	sensor->link_freq[0] = T4KA3_LINK_FREQ;
-	sensor->res = &t4ka3_res[0];
-	t4ka3_fill_format(sensor, &sensor->format, sensor->res->width, sensor->res->height);
+	sensor->mode.crop = t4ka3_default_crop;
+	t4ka3_fill_format(sensor, &sensor->mode.fmt, T4KA3_ACTIVE_WIDTH, T4KA3_ACTIVE_HEIGHT);
+	t4ka3_calc_mode(sensor);
 
 	v4l2_i2c_subdev_init(&(sensor->sd), client, &t4ka3_ops);
+	sensor->sd.internal_ops = &t4ka3_internal_ops;
 
 	sensor->powerdown_gpio = devm_gpiod_get(&client->dev, "powerdown", GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->powerdown_gpio))
