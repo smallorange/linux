@@ -27,6 +27,7 @@
 #include <media/v4l2-cci.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
+#include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
 #define T4KA3_NATIVE_WIDTH			3280
@@ -845,6 +846,55 @@ t4ka3_get_pad_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int t4ka3_check_hwcfg(struct t4ka3_data *sensor)
+{
+	struct fwnode_handle *fwnode = dev_fwnode(sensor->dev);
+	struct v4l2_fwnode_endpoint bus_cfg = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY,
+	};
+	struct fwnode_handle *endpoint;
+	unsigned int i;
+	int ret;
+
+	endpoint = fwnode_graph_get_next_endpoint(fwnode, NULL);
+	if (!endpoint)
+		return -EPROBE_DEFER; /* Could be provided by cio2-bridge */
+
+	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, &bus_cfg);
+	fwnode_handle_put(endpoint);
+	if (ret)
+		return ret;
+
+	if (bus_cfg.bus.mipi_csi2.num_data_lanes != 4) {
+		dev_err(sensor->dev, "only a 4-lane CSI2 config is supported");
+		ret = -EINVAL;
+		goto out_free_bus_cfg;
+	}
+
+	if (!bus_cfg.nr_of_link_frequencies) {
+		dev_err(sensor->dev, "no link frequencies defined\n");
+		ret = -EINVAL;
+		goto out_free_bus_cfg;
+	}
+
+	for (i = 0; i < bus_cfg.nr_of_link_frequencies; i++) {
+		if (bus_cfg.link_frequencies[i] == T4KA3_LINK_FREQ)
+			break;
+	}
+
+	if (i == bus_cfg.nr_of_link_frequencies) {
+		dev_err(sensor->dev, "supported link freq %ull not found\n",
+			T4KA3_LINK_FREQ);
+		ret = -EINVAL;
+		goto out_free_bus_cfg;
+	}
+
+out_free_bus_cfg:
+	v4l2_fwnode_endpoint_free(&bus_cfg);
+
+	return ret;
+}
+
 static int t4ka3_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *sd_state)
 {
@@ -1007,6 +1057,12 @@ static int t4ka3_probe(struct i2c_client *client)
 	sensor = devm_kzalloc(&client->dev, sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return -ENOMEM;
+	
+	sensor->dev = &client->dev;
+	
+	ret = t4ka3_check_hwcfg(sensor);
+	if (ret)
+		return ret;
 
 	mutex_init(&sensor->lock);
 
@@ -1034,7 +1090,6 @@ static int t4ka3_probe(struct i2c_client *client)
 	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
 	if (IS_ERR(sensor->regmap))
 		return PTR_ERR(sensor->regmap);
-	sensor->dev = &client->dev;
 
 	ret = t4ka3_s_config(&sensor->sd, client->irq);
 	if (ret)
